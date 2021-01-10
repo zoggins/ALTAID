@@ -15,6 +15,20 @@
                         ;* from the board.
                         ;************************************
                         
-1 Error(s)
-*                       	END	 ;added by A85
-
+   2000                 			ORG 	2000H
+   2000   06 00         INIT: 		MVI	 	B,0			; Set B to initial value of 0
+   2002   04            START: 		INR 	B			; Toggle Speaker
+   2003   78            			MOV	 	A,B	
+   2004   d3 61         			OUT 	61H	 
+   2006   db 60         			IN 		60H		; Read buttons
+   2008   0f            			RRC		
+   2009   e6 7f         			ANI		7FH
+   200b   00            DELAY: 		NOP
+   200c   00            			NOP
+   200d   00            			NOP
+   200e   3d            			DCR		A			; Delay by an amount specified
+   200f   f2 0b 20      			JP		DELAY		; by the count in A
+   2012   fa 02 20      			JM		START		; Go Start
+   2015                 			END
+200b  DELAY         2000  INIT          2002  START         
+
