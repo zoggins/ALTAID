@@ -1,0 +1,25 @@
+                        ; DEMO.ASM
+                        ;
+                        ; ALTAIDS computer demo
+                        ; based on Altair demo from Popular Electronics, Feb 1975
+                        ;
+                        ; COMMAND TO ASSEMBLE: 
+                        ;	a85 demo.asm -l demo.prn -o demo.hex
+                        ; 
+                        ;
+   2000                 	ORG	2000H
+   2000   3a 80 20      DEMO:	LDA	VAR1
+   2003   47            	MOV	B,A
+   2004   3a 81 20      	LDA	VAR2
+   2007   80            	ADD	B
+   2008   32 82 20      	STA	VAR3
+   200b   c3 00 20      	JMP	DEMO
+                        ;	
+   2080                 	ORG	2080H
+   2080   1c            VAR1:	DB	1CH
+   2081   08            VAR2:	DB	08H
+   2082   00            VAR3:	DB	0
+                        
+   2083                 	END
+2000  DEMO          2080  VAR1          2081  VAR2          2082  VAR3      
+
