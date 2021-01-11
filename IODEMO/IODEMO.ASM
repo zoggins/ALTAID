@@ -4,7 +4,7 @@
 ;*
 ;* Schematic provided in folder
 ;* Switchs must go to 5v and GND, 
-;* not GND and float.
+;* not just GND.
 ;* 
 ;* Adapted from the demo in the
 ;* KIM-1 manual.
