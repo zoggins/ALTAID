@@ -2,9 +2,7 @@
 ;* Demo using my speaker/switch
 ;* board.
 ;*
-;* Schematic provided in folder
-;* Switchs must go to 5v and GND, 
-;* not just GND.
+;* PA0-PA7 = J2 pins 0-7
 ;* 
 ;* Adapted from the demo in the
 ;* KIM-1 manual.
