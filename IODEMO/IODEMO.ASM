@@ -19,6 +19,7 @@ START: 		INR 	B			; Toggle Speaker
 			MOV	 	A,B	
 			OUT 	61H	 
 			IN 		60H			; Read buttons
+			CMA
 			RRC		
 			ANI		7FH
 DELAY: 		NOP
