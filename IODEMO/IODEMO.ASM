@@ -2,15 +2,17 @@
 ;* Demo using my speaker/switch
 ;* board.
 ;*
-;* PA0-PA7 = J2 pins 0-7
+;* Hardware: v3 speaker board
+;*
+;* Connections: J1 1-8 = Altaid J2 Pins 1-8
+;*              J1 9   = Altaid J2 Pin 9
+;*              J1 10  = Altaid J2 Pin 10
+;*              J2 1   = 5v
+;*              J2 2   = GND
 ;* 
 ;* Adapted from the demo in the
 ;* KIM-1 manual.
 ;*
-;* NOTE: The sound is SUPER SUPER
-;* quiet.  I suspect its because
-;* the Altaid is vampiring the voltage
-;* from the board.
 ;************************************
 
 			ORG 	2000H
