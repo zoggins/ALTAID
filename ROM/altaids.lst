@@ -1,5 +1,5 @@
                         ; Altaids ROM
-                        ; (c) 2016-2018	David R. Hunter
+                        ; (c) 2016-2019	David R. Hunter
                         ;
                         ; This program is free software: you can redistribute it and/or modify
                         ; it under the terms of the GNU General Public License as published by
@@ -104,7 +104,7 @@
                         ;	200 msec/line
                         ;
                         ;
-                        	TITLE	"Altaids ROM VER 5"
+                        	TITLE	"Altaids ROM VER 6"
                         ;
                         ;	06/14/16	D. Hunter - started project
                         ;	05/07/17	D. Hunter - editor and disassembler complete
@@ -113,10 +113,11 @@
                         ;				  - replaced monitor with my own version
                         ;	04/22/18	D. Hunter - added 1D arrays to Tiny BASIC
                         ;				  - added RANDOMIZE keyword to change random seed
+                        ;	07/05/19	D. Hunter - fixed disassembler bug
                         ;
                         ;
                         ;
-   3530                 VERS	EQU	'50'	; Version number (2 bytes)
+   3630                 VERS	EQU	'60'	; Version number (2 bytes)
                         ;			  BYTES REVERSED FOR DISPLAY ORDER
                         ;			  e.g. 20 == '0',' 2'
    0050                 BUFSIZ	EQU	80	; BUFFER SIZE
@@ -3254,7 +3255,7 @@
                         
                         ;!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                         ; START OF THE 8085 MONITOR
-                        ; (c) 2018 David R. Hunter
+                        ; (c) 2018-2019 David R. Hunter
                         ;
    1000                 	ORG	1000H	; start of monitor at second 4k boundary
                         ;
@@ -3845,6 +3846,8 @@
    137e   c9            	RET			; OPCODE BYTE COUNT IS NOW IN A
                         ;
                         ;
+                        ;	ORG	1600H		; SKIP BAD BLOCK OF EEPROM
+                        ;
                         ;************************************************************
                         ;* 8085 DISASSEMBLER
                         ;* (c) 2017  DAVID HUNTER
@@ -4415,13 +4418,13 @@
    170b   4d 6f 6e 69   
    170f   74 6f 72 20   
    1713   56 65 72 20   
-   1717   30 35         	DW	VERS
+   1717   30 36         	DW	VERS
    1719   0d 0a         	DB	CR,LF
-   171b   43 6f 70 79   	DB	'Copyright (C) 2018 David R. Hunter',CR,LF
+   171b   43 6f 70 79   	DB	'Copyright (C) 2019 David R. Hunter',CR,LF
    171f   72 69 67 68   
    1723   74 20 28 43   
    1727   29 20 32 30   
-   172b   31 38 20 44   
+   172b   31 39 20 44   
    172f   61 76 69 64   
    1733   20 52 2e 20   
    1737   48 75 6e 74   
@@ -4639,6 +4642,7 @@
    19e9   6e 69 74 6f   
    19ed   72            
    19ee   00            	DB	0
+                        ;
                         ;
                         ;
                         ;*********************************************************************
@@ -4912,7 +4916,7 @@
    3fb2   00 00         RANDOM:	DW	0	; COUNTER UPDATED BY SERIAL POLL
                         ;
    3fb4                 	END
-Altaids ROM VER 5
+Altaids ROM VER 6
 
 2000  ABORTF        06e7  ABS           0006  ACK           0f82  AGN       
 00fe  AHOW          1093  ALTAIR        002e  APROMPT       2016  ARRUNF    
@@ -5045,7 +5049,7 @@
 13c9  TYPE3B        13de  TYPE3C        142b  TYPE3D        1440  TYPE3E    
 146f  TYPE3F        1485  TYPE3G        0d78  UPDEX         0d6e  UPDTXT    
 076d  USR           078c  USRET         3fb0  VADDR         3e00  VARBGN    
-2006  VARNXT        3fa0  VARTMP        3530  VERS          0d7d  WAITCH    
+2006  VARNXT        3fa0  VARTMP        3630  VERS          0d7d  WAITCH    
 0d87  WAITLP        1030  WARM          010c  WHAT          1003  WSTART    
 0d41  XERROR        0d9b  XINP          0d9f  XINP1         0da6  XINP2     
 0dab  XINP3         0dad  XINP4         0dc0  XINP5         0145  XLMSG     

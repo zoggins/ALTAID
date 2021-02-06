@@ -1,5 +1,5 @@
 ; Altaids ROM
-; (c) 2016-2018	David R. Hunter
+; (c) 2016-2019	David R. Hunter
 ;
 ; This program is free software: you can redistribute it and/or modify
 ; it under the terms of the GNU General Public License as published by
@@ -104,7 +104,7 @@
 ;	200 msec/line
 ;
 ;
-	TITLE	"Altaids ROM VER 5"
+	TITLE	"Altaids ROM VER 6"
 ;
 ;	06/14/16	D. Hunter - started project
 ;	05/07/17	D. Hunter - editor and disassembler complete
@@ -113,10 +113,11 @@
 ;				  - replaced monitor with my own version
 ;	04/22/18	D. Hunter - added 1D arrays to Tiny BASIC
 ;				  - added RANDOMIZE keyword to change random seed
+;	07/05/19	D. Hunter - fixed disassembler bug
 ;
 ;
 ;
-VERS	EQU	'50'	; Version number (2 bytes)
+VERS	EQU	'60'	; Version number (2 bytes)
 ;			  BYTES REVERSED FOR DISPLAY ORDER
 ;			  e.g. 20 == '0',' 2'
 BUFSIZ	EQU	80	; BUFFER SIZE
@@ -3230,7 +3231,7 @@ OUTCHK:	CALL	OUTT
 
 ;!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ; START OF THE 8085 MONITOR
-; (c) 2018 David R. Hunter
+; (c) 2018-2019 David R. Hunter
 ;
 	ORG	1000H	; start of monitor at second 4k boundary
 ;
@@ -3821,6 +3822,8 @@ FSTCN:	RLC			; ROTATE VALUE TO BIT 0
 	RET			; OPCODE BYTE COUNT IS NOW IN A
 ;
 ;
+;	ORG	1600H		; SKIP BAD BLOCK OF EEPROM
+;
 ;************************************************************
 ;* 8085 DISASSEMBLER
 ;* (c) 2017  DAVID HUNTER
@@ -4389,7 +4392,7 @@ SIGNON:	DB	CR,LF
 	DB	'Altaids Monitor Ver '
 	DW	VERS
 	DB	CR,LF
-	DB	'Copyright (C) 2018 David R. Hunter',CR,LF
+	DB	'Copyright (C) 2019 David R. Hunter',CR,LF
 	DB	'This program comes with ABSOLUTELY NO WARRANTY',CR,LF
 	DB 	'This is free software, and you are welcome to redistribute it',CR,LF
 	DB	'under certain conditions; see the GNU GPL Version 3 for details',CR,LF
@@ -4456,6 +4459,7 @@ DISINS:	DB	CR,LF
 	DB	CR,LF
 	DB	'Press ^C to return to the Monitor'
 	DB	0
+;
 ;
 ;
 ;*********************************************************************
