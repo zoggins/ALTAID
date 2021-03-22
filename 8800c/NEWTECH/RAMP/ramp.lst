@@ -1,0 +1,13 @@
+                        ; MODEL 6 MUSIC BOARD TEST ROUTINE.
+                        ;
+                        ; THIS ROUTINE PRODUCES A TRIANGULAR 
+                        ; RAMP WAVEFORM OF 312.5 HZ FOR A
+                        ; 2MHZ CLOCK 8080 SYSTEM WITH NO WAIT
+                        ; STATES.
+                        
+   0000   3c            START	INR	A		; CALCULATE NEXT STEP.
+   0001   d3 24         		OUT 24H		; OUTPUT TO MODEL 6
+   0003   c3 00 00      		JMP START	; LOOP
+   0006                 		END
+0000  START         
+

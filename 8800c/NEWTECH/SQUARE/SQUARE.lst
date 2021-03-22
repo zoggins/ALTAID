@@ -1,0 +1,19 @@
+                        ; MODEL 6 MUSIC BOARD TEST ROUTINE.
+                        ;
+                        ; THIS ROUTINE OUTPUTS A MAXIMUM
+                        ; AMPLITUDE SQUAREWAVE FOR USE AS
+                        ; A REFERENCE IN SETTING UP VOLUME
+                        ; CONTROL LEVELS.  FOR AN 8080 WITH
+                        ; NO WAIT STATES, THE FREQUENCY WILL
+                        ; BE 1005 HERTZ.
+                        ;
+   0000   97            START	SUB A		;ZERO ACCUMULATOR
+   0001   06 40         LOOP1	MVI B,64	;INITIALIZE LOOP COUNTER
+   0003   05            		DCR B		;WASTE TIME
+   0004   c2 03 00      		JNZ	$-1
+   0007   2f            		CMA			;COMPLEMENT & OUTPUT A
+   0008   d3 24         		OUT	24H		;**CHANGE IF OTHER PORT*
+   000a   c3 01 00      		JMP	LOOP1	;DO NEXT HALF WAVE
+   000d                 		END
+0001  LOOP1         0000  START         
+

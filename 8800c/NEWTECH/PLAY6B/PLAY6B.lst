@@ -1,0 +1,127 @@
+                        ; MICROPLAY REV.B DECEMBER 1977
+                        ; NEWTECH COMPUTER SYSTEMS INC.
+                        ; 230 Clinton Street
+                        ; Brooklyn, N.Y. 11201
+                        ;
+                        ; MICROPLAY STARTS AT THE BEGINHING OF THE
+                        ; MEMORY AREA DESIGNATED *SCORE* AND
+                        ; TRANSFERS INTO THE PLAY ROUTING A 1-BYTE
+                        ; PITCH PARAMETER AND A 2-BUTE DURATION
+                        ; PARAMETER.  (BITS A5,A4 AND A3 OF THE
+                        ; DURATION PARAMETER MOST SIGNIFICANT BYTE
+                        ; IS USED AS A FIELD TO SPECIFY WHICH
+                        ; AMPLITUDE ENVELOPE IS TO BE USED.)
+                        ; MICROPLAY CONTINUES TRANSFERRING NOTE
+                        ; PARAMETERS AND CALLING THE PLAY ROUTINE
+                        ; UNTIL A PITCH CONSTANT OF ZERO IS
+                        ; ENCOUNTERED WHICH INDICATES THE END OF
+                        ; THE MUSICAL SCORE.
+                        ;    THIS VERSION OF MICROPLAY WAS WRITTEN
+                        ; FOR A 8080 HAVING 0 WAIT STATES BUT CAN
+                        ; BE MODIFIED FOR 8080'S WITH WAIT STATES
+                        ; OR FOR Z80 PROCESSORS.
+                        ;
+   0000   31 c1 00      BEGIN		LXI		SP,STACK		;INIT. STACK POINTER.
+   0003   21 00 01      INIT		LXI		H,SCORE			;INIT. SCORE POINTER.
+   0006   22 af 00      			SHLD	PLACE
+   0009   2a af 00      NEXT		LHLD	PLACE			;IF END OF SCORE THEN
+   000c   3e 00         			MVI		A,0				;LOOP HERE.
+   000e   be            			CMP		M
+   000f   ca 0f 00      HERE		JZ		HERE			;YOUR ENDING?
+                        ;									;ELSE TRANSFER
+                        ;									;PARAMETERS FOR NEXT
+                        ;									;NOTE OF SCORE INTO
+                        ;									;PLAY ROUTINE.
+   0012   7e            			MOV		A,M				;LOAD PITCH.
+   0013   32 4b 00      			STA		XFER2+1		
+   0016   32 6a 00      			STA		XFER4+1
+   0019   23            			INX		H
+   001a   7e            			MOV		A,M				;LOAD NOTE DURATION
+   001b   32 44 00      			STA		XFER1+1			;LSD.
+   001e   32 67 00      			STA		XFER3+1
+   0021   23            			INX		H
+   0022   7e            			MOV		A,M				;LOAD NOTE DURATION
+   0023   e6 07         			ANI		07H				;MASK 3 LSB'S.
+   0025   32 45 00      			STA		XFER1+2			;MSD.
+   0028   32 68 00      			STA		XFER3+2
+   002b   7e            			MOV		A,M				;GET MSD AGAIN
+   002c   e6 38         			ANI		38H				;MASK 3 BITS
+   002e   c6 6f         			ADI		6FH				;ENVELOPE SPEC ADDRESS
+   0030   32 3e 00      			STA		PLAY+1
+   0033   23            			INX		H
+   0034   22 af 00      			SHLD	PLACE			;SAVE PLACE IN SCORE
+                        ;
+   0037   cd 3d 00      			CALL	PLAY			;PLAY ONE NOTE.
+   003a   c3 09 00      			JMP		NEXT			;GO DO NEXT NOTE.
+                        ;
+                        ;
+                        ;
+   003d   21 6f 00      PLAY		LXI		H,TBL1			;INIT EVELOPE POINTER
+   0040   1e 08         			MVI		E,8				;INIT. SEGMENT COUNT
+   0042   7e            			MOV		A,M				;GET STARTING
+                        ;									;AMPLITUDE.
+   0043   01 00 00      XFER1		LXI		B,LNGTH			;INIT. DURATION COUNT.
+   0046   40            LOOP2		MOV		B,B				;WASTE TIME (WT2)
+   0047   c3 4a 00      			JMP		XFER2			;(WT)
+   004a   16 00         XFER2		MVI		D,PITCH			;INIT. PITCH CONSTANT.
+   004c   d3 24         			OUT		MODL6			;OUTPUT HALF WAVE TO
+                        ;									;MUSIC BOARD.
+   004e   34            			INR		M				;WASTE MUCH TIME (WMT)
+   004f   35            			DCR		M
+   0050   34            			INR		M
+   0051   35            			DCR		M
+   0052   34            			INR		M
+   0053   35            			DCR		M
+   0054   15            LOOP3		DCR		D				;DELAY ACCORDING TO
+   0055   c2 54 00      			JNZ		LOOP3			;PITCH CONSTANT.
+   0058   ae            			XRA		M				;COMPLEMENT A.
+   0059   0d            			DCR		C				;COUNT DOWN DURATION #.
+   005a   c2 46 00      			JNZ		LOOP2
+   005d   05            			DCR		B
+   005e   c2 4a 00      			JNZ		XFER2
+   0061   d3 24         			OUT		MODL6
+   0063   23            			INX		H				;SET UP NEXT SEGMENT.
+   0064   1d            			DCR		E				;DCR SEGMENT COUNT.
+   0065   c8            			RZ						;RETURN IF ALL
+                        ;									;SEGMENTS DONE.
+   0066   01 00 00      XFER3		LXI		B,LNGTH
+   0069   16 00         XFER4		MVI		D,PITCH
+   006b   7e            			MOV		A,M				;SET NEW AMPLITUDE.
+   006c   c3 54 00      			JMP		LOOP3
+                        ; ENVELOPE SPECIFICATION:
+                        ; TBL1 THRU TBL8 ARE 8 DIFFERENT NOTE
+                        ; EVELOPE SPECIFICATIONS, EACH ONE
+                        ; CONSISTING OF 8 AMPLITUDE SEGMENTS.
+                        ;
+   006f   ff ff e0 c0   TBL1		DB		0FFH,0FFH,0E0H,0C0H	;ATTACH:#5
+   0073   a0 90 70 50   			DB		0A0H,90H,70H,50H
+   0077   00 00 00 00   TBL2		DB		0,0,0,0				;REST:#R
+   007b   00 00 00 00   			DB		0,0,0,0
+   007f   c0 ff 90 60   TBL3		DB		0C0H,0FFH,90H,60H	;STACCATO:#S
+   0083   35 00 00 00   			DB		35H,0,0,0
+   0087   c0 ff ff ff   TBL4		DB		0C0H,0FFH,0FFH,0FFH	;LEGATO:#L
+   008b   ff ff a0 90   			DB		0FFH,0FFH,0A0H,90H	
+   008f   70 80 60 20   TBL5		DB		70H,80H,60H,20H		;SOFT STACCATO:#1
+   0093   00 00 00 00   			DB		0,0,0,0				
+   0097   70 80 80 80   TBL6		DB		70H,80H,80H,80H		;SOFT LEGATO:#2
+   009b   80 80 60 40   			DB		80H,80H,60H,40H
+   009f   a0 b7 d0 ff   TBL7		DB		0A0H,0B7H,0D0H,0FFH	;"SHAPED":#3
+   00a3   ff ff c7 a0   			DB		0FFH,0FFH,0C7H,0A0H	
+   00a7   70 85 a0 b5   TBL8		DB		70H,85H,0A0H,0B5H	;CRESCENDO:#4
+   00ab   d0 ff ff a0   			DB		0D0H,0FFH,0FFH,0A0H
+                        ;
+   00af   00 00         PLACE		DW		0					;SCORE POINTER.
+   0100                 SCORE		EQU		0100H				;YOUR SCORE LOCATION?
+   0024                 MODL6		EQU		24H					;YOUR OUTPUT PORT?
+   0000                 PITCH		EQU		0					;DUMMY EQUATE
+   0000                 LNGTH		EQU		0					;DUMMY EQUATE
+   00c1                 STACK		EQU		$+10H
+   00b1                 			END
+0000  BEGIN         000f  HERE          0003  INIT          0000  LNGTH     
+0046  LOOP2         0054  LOOP3         0024  MODL6         0009  NEXT      
+0000  PITCH         00af  PLACE         003d  PLAY          0100  SCORE     
+00c1  STACK         006f  TBL1          0077  TBL2          007f  TBL3      
+0087  TBL4          008f  TBL5          0097  TBL6          009f  TBL7      
+00a7  TBL8          0043  XFER1         004a  XFER2         0066  XFER3     
+0069  XFER4         
+
