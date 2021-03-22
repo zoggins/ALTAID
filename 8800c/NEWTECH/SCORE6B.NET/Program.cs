@@ -312,7 +312,7 @@ namespace Score68B.Net
                                 int d3 = Convert.ToInt32(k4);
                                 int d4 = 2 * d3 - 2 * Convert.ToInt32(d3 / 2.0);
                                 var d5 = Convert.ToInt32(d4 / 256.0);
-                                int d6 = d5 + e1;
+                                int d6 = d5 + 1+ e1;
                                 int d7 = d4 - d5 * 256;
 
                                 //Console.WriteLine("{0:X2} {1:X2} {2:X2}", (Convert.ToInt32(Math.Floor(k3 + .5))), d6, d7);
