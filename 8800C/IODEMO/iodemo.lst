@@ -1,0 +1,39 @@
+                        ;*****************************************************
+                        ;* Demo using my speaker/switch
+                        ;* board.
+                        ;*
+                        ;* Hardware: v4 speaker board with R4-R10 shorted
+                        ;*			 Cromemco 8PIO Parallel Card
+                        ;*
+                        ;* Connections: J1 1   = 8PIO BIT D0 PORT 3
+                        ;*				J1 2-8 = 8PIO BITs D0 - D6 PORT 2
+                        ;*              J1 9   = 8PIO OUTPUT STROBE 2
+                        ;*              J1 10  = 8PIO GROUND RETURN
+                        ;*              J2 1   = 5v
+                        ;*				J2 2   = 8PIO LATCH INPUT 2
+                        ;*              J2 3   = GND
+                        ;* 
+                        ;* Adapted from the demo in the
+                        ;* KIM-1 manual.
+                        ;*
+                        ;*****************************************************
+                        
+   2000                 			ORG 	2000H
+   2000   06 00         INIT: 		MVI	 	B,0			; Set B to initial value of 0
+   2002   3e 08         			MVI		A, 08H
+   2004   d3 86         			OUT		86H
+   2006   04            START: 		INR 	B			; Toggle Speaker
+   2007   78            			MOV	 	A,B	
+   2008   d3 83         			OUT 	83H	 
+   200a   db 82         			IN 		82h			; Read buttons
+   200c   2f            			CMA
+   200d   e6 7f         			ANI		7FH
+   200f   00            DELAY: 		NOP
+   2010   00            			NOP
+   2011   00            			NOP
+   2012   3d            			DCR		A			; Delay by an amount specified
+   2013   f2 0f 20      			JP		DELAY		; by the count in A
+   2016   fa 06 20      			JM		START		; Go Start
+   2019                 			END
+200f  DELAY         2000  INIT          2006  START         
+
