@@ -317,8 +317,8 @@ namespace Score68B.Net
 
                                 //Console.WriteLine("{0:X2} {1:X2} {2:X2}", (Convert.ToInt32(Math.Floor(k3 + .5))), d6, d7);
                                 byteArray[3 * (v - 1)] = (byte)Convert.ToInt32(Math.Floor(k3 + .5));
-                                byteArray[3 * (v - 1) + 1] = (byte)d6;
-                                byteArray[3 * (v - 1) + 2] = (byte)d7;
+                                byteArray[3 * (v - 1) + 1] = (byte)d7;
+                                byteArray[3 * (v - 1) + 2] = (byte)d6;
 
                                 v++;
                             }
