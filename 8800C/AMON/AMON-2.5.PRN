@@ -1,0 +1,4168 @@
+                ;==============================================================
+                ; AMON
+                ;
+                ; ROM-BASED MONITOR FOR AN 8080 BASED SYSTEM, SUPPORTING THE
+                ; 88-2SIOJP AND THE ALTAIR 88-2SIO
+                ;
+                ; FORMATTED TO ASSEMBLE WITH DIGITAL RESEARCH'S ASM.
+                ;
+                ;==============================================================
+                ; ENTRY POINTS:
+                ; F800H: COLD-START AMON, ENTER COMMAND LOOP
+                ; FC00H: BOOT FROM MITS 88-HDSK ALTAIR HARD DISK
+                ;        (EQUIVALENT TO MY HDBL)
+                ; FE00H: BOOT FROM ALTAIR PAPER OR CASSETTE TAPE
+                ;        (EQUIVALENT TO MITS'S MBL)
+                ; FF00H: BOOT FROM MITS 88-DCDD 8" FLOPPY OR 88-MDS MINIDISK
+                ;        (EQUIVALENT TO MY CDBL, AND MITS'S DBL AND MDBL)
+                ;==============================================================
+                ;
+                ; AMON ASSUMES THE CONSOLE IS ON PORT 0 OF THE 88-2SIO/JP,
+                ; AND THAT THE CONSOLE TERMINAL MAY OPTIONALLY BE A PRINTING
+                ; TERMINAL (E.G. A TELETYPE) THAT HAS NO BACKSPACE CAPABILITY.
+                ;
+                ; AMON DEFINES A "TRANSFER PORT" FOR UPLOADS, DOWNLOADS, AND
+                ; TERMINAL MODE. THIS CAN BE SET TO ANY OF THE STANDARD ALTAIR
+                ; PORTS. YOU CAN ALSO SET UP A CUSTOM PORT PRIOR TO ASSEMBLY,
+                ; WHICH WILL BE PORT 7 IN THE TP COMMAND. (IF YOUR CUSTOM PORT
+                ; REQUIRES INITIALIZATION, THEN YOU MUST ADD CODE FOR THIS.)
+                ; COMMANDS (ALL VALUES ARE IN HEX). THE "?" AND "MT" COMMANDS
+                ; ARE ONLY AVAILABLE WITH A 2732 EPROM (EPROM32 = TRUE)
+                ;
+                ; ?   PRINT HELP SCREEN {EPROM32 ONLY}
+                ;
+                ; AD <ADR> <BCNT> [<GO>]
+                ;     WRITE <BCNT> BYTES OF MEMORY STARTING AT <ADR> IN ALTAIR
+                ;     ABSOLUTE BINARY FORMAT, TO THE CURRENT TRANSFER PORT.
+                ;     OPTIONAL GO RECORD APPENDED IF <GO> PROVIDED.
+                ;
+                ; AL  [<0/1>]
+                ;    LOAD AND EXECUTE AN ALTAIR ABSOLUTE BINARY FILE FROM THE
+                ;    CURRENT TRANSFER PORT. (THIS IS MBL.) IF THE OPTIONAL
+                ;    PARAMETER IS 0 THEN THE GO RECORD IN THE FILE WILL BE
+                ;    IGNORED, AND CONTROL RETURNS TO THE MONITOR, AFTER
+                ;    PRINTING THE GO ADDRESS ON THE CONSOLE. PARAMETER DEFAULTS
+                ;    TO 1 (MEANING A GO RECORD IS EXECUTED).
+                ;
+                ; BO  BOOT FROM ALTAIR FLOPPY DISK. (THIS IS CDBL.)
+                ;
+                ; CO <SRC> <DST> <BCNT> [<RPT>]
+                ;    COPY <BCNT> BYTES OF MEMORY FROM ADDRESS <SRC> TO ADDRESS
+                ;    <DST>. OPTIONALLY REPEAT <RPT> TIMES (FOR PROGRAMMING
+                ;    EPROMS WITH E.G. A CROMEMCO BYTESAVER).
+                ;
+                ; DU [<ADR> [<BCNT>]]
+                ;    DUMP <BCNT> (WHICH DEFAULTS TO 1) BYTES OF MEMORY STARTING
+                ;    AT ADDRESS <ADR> (WHICH DEFAULTS TO 0).
+                ;
+                ; EN [<ADR>]
+                ;    ENTER HEX DATA INTO MEMORY AT <ADR>, WHICH DEFAULTS TO 0.
+                ;    VALUES ARE SEPARATED WITH SPACES OR CR'S. QUIT EN COMMAND
+                ;    WITH A BLANK LINE.
+                ;
+                ; EX [<ADR> [<OPT>]]
+                ;    EXECUTE AT <ADR>, WHICH DEFAULTS TO 0. PROGRAMS CAN RET
+                ;    TO AMON'S MAIN LOOP. IF <OPT>=1 THEN AN IN FROM PORT
+                ;    FF IS EXECUTED FIRST, TO DISABLE THIS PROM.
+                ;
+                ; FI [<VAL> [<ADR> [<BCNT>]]]
+                ;    FILL <BCNT> BYTES OF MEMORY STARTING AT <ADR> WITH <VAL>
+                ;    <VAL> AND <ADR> DEFAULT TO 0. <BCNT> DEFAULTS TO ALL OF
+                ;    MEMORY, STOPPING (AFTER WRAP-AROUND IF NECESSARY) WHEN
+                ;    THE FILL REACHES AMON'S RAM PAGE.
+                ;
+                ; HB [<PLTR>] BOOT FROM HARD DISK PLATTER <PLTR> (0 OR 1)
+                ;
+                ; HD <ADR> <BCNT> [<OFST>]
+                ;    INTEL HEX DUMP <BCNT> BYTES OF MEMORY STARTING AT <ADR>,
+                ;    TO THE TRANSFER PORT. ADD <OFST> TO EACH ADDRESS.
+                ;
+                ; HL [<OFST>]
+                ;    LOAD INTEL HEX FILE TO MEMORY FROM THE TRANSFER PORT. ADD
+                ;    OPTIONAL ADDRESS OFFSET <OFST> TO EACH RECORD ADDRESS.
+                ;    PRINTS A PACIFIER DOT ON THE CONSOLE FOR EACH RECORD.
+                ;
+                ; IN <PORT>
+                ;    READ FROM <PORT> AND PRINT THE RESULT ON THE CONSOLE
+                ;
+                ; MT <ADR> <BCNT> {EPROM32 ONLY}
+                ;    TEST <BCNT> BYTES OF MEMORY, STARTING AT <ADR>. THIS WILL
+                ;    SKIP OVER THE PORTION OF RAM USED BY AMON FOR ITS STACK.
+                ;
+                ; OT <PORT> <VAL>
+                ;    WRITE THE SPECIFIED VALUE TO THE SPECIFIED OUTPUT PORT
+                ;
+                ; SE <ADR> <BYTE1> [<BYTE2> [<BYTE3> [..<BYTEN>]]]
+                ;     OR
+                ; SE <ADR> 'TEXT STRING'
+                ;    SEARCH FOR STRING OF BYTES IN MEMORY, STARTING AT <ADR>
+                ;    CAN ALSO MIX FORMS, E.G.
+                ; SE 100 'HELLO WORLD' 0D 0A 'SECOND LINE'
+                ;
+                ; TE [<EXCHR>]
+                ;    TERMINAL MODE: CONSOLE KEYBOARD DATA GOES TO THE TRANSFER
+                ;    PORT, AND TRANSFER PORT DATA GOES TO THE CONSOLE.
+                ;    ^C TO EXIT, UNLESS YOU SPECIFIED A DIFFERENT EXIT CHR.
+                ;
+                ; TP [<PORT>]
+                ;    SET THE TRANSFER PORT:
+                ;        PORT   DEVICE
+                ;         0    88-2SIO PORT 0, 2 STOP BITS
+                ;         1    88-2SIO PORT 0, 2 STOP BITS
+                ;         2    88-SIO
+                ;         3    88-ACR
+                ;         4    88-4PIO PORT 0
+                ;         5    88-PIO
+                ;         6    88-2SIO PORT 1, 2 STOP BITS
+                ;         7    CUSTOM PORT (SET UP FOR 88-2SIO PORT 0)
+                ;
+                ; TT [0/1]
+                ;    TT 1 SPECIFIES A TELETYPE (OR OTHER NON-BACKSPACING
+                ;    DEVICE) AS THE CONSOLE. TT OR TT 0 SPECIFIES A DEVICE
+                ;    (SUCH AS A TERMINAL) THAT CAN BACKSPACE. THIS CONTROLS HOW
+                ;    A BACKSPACE IS DISPLAYED.
+                ;
+                ; VE <SRC> <DST> <BCNT>
+                ;    VERIFY (COMPARE) <BCNT> BYTES OF MEMORY, STARTING AT <SRC>
+                ;    AND <DST>
+                ;
+                ;==============================================================
+                ; RAM USAGE
+                ;
+                ; AMON FINDS AND USES THE HIGHEST CONTIGUOUS 256-BYTE PAGE OF
+                ; RAM FOR ITS STACK, BUFFERS, AND CODE THAT GETS MODIFIED (SUCH
+                ; AS THE SERIAL I/O ROUTINES).
+                ;
+                ; WHEN MBL IS EXECUTED DIRECTLY (NOT VIA A CALL FROM AMON), IT
+                ; READS THE SWITCH REGISTER TO DETERMINE THE BOOT PORT. NOTE
+                ; THAT THE 88-2SIOJP MAY BE CONFIGURED TO DISABLE THE PROM ONCE
+                ; AN "IN 0FFH" (INPUT FROM THE FRONT PANEL SWITCH REGISTER) IS
+                ; EXECUTED. 
+                ;
+                ; THE SECTOR BUFFER IS POSITIONED WITHIN THE RAM PAGE SUCH THAT
+                ; ITS LAST BYTE IS THE LAST BYTE OF THE RAM PAGE. THIS MAKES
+                ; THE TIMING WORK IN THE CRITICAL BYTE-READ LOOP, WHEN BOOTING
+                ; FROM AN 8" FLOPPY DISKETTE.
+                ;
+                ; RAM PAGE ORGANIZATION:
+                ;
+                ; XX00: TRANSFER PORT I/O ROUTINES
+                ;       RSETP: SET THE TRANSFER PORT ACCORDING TO REGISTER A
+                ;              (SEE TP COMMAND BELOW.)
+                ;       RTPIS: GET TRANSFER PORT INPUT STATUS. Z CLEAR IF
+                ;              DATA IS AVAILABLE.
+                ;       RTPIN: WAIT FOR AND GET ONE CHR FROM THE TRANSFER PORT
+                ;       RTIIF: READ IMMEDIATELY FROM THE TRANSFER PORT (FLUSH)
+                ;       RTPOUT: WRITE A TO THE TRANSFER PORT
+                ; XX6B-XX7A: STACK (ROOM FOR 8 PUSHES)
+                ; XX7B-XXFF: SECTOR BUFFER (FOR BO COMMAND)
+                ; XX7B-XXFF: MBL RAM CODE FOR AL COMMAND, ESPECIALLY FOR DIRECT
+                ;            EXECUTION FROM FE00
+                ; XX7B-XXCA: COMMAND LINE BUFFER FOR MONITOR
+                ;==============================================================
+                ; REVISION HISTORY
+                ; VERS. 1.00-1.06
+                ;   DEVELOPMENT
+                ; VERS. 2.0  M. EBERHARD  26 JULY 2016
+                ;   FIRST RELEASED VERSION
+                ; VERS. 2.1  M. EBERHARD  27 AUGUST 2016
+                ;   FIX BUG WHEN EXECUTING AT F800
+                ; VERS. 2.2  M. EBERHARD 4 OCTOBER 2016
+                ;   SQUEEZE CODE A BIT, ADD IN AND OT COMMANDS
+                ; VERS. 2.3 M. EBERHARD  10 OCTOBER 2016
+                ;   SQUEEZE CODE, IMPROVE ERROR REPORTING, IMPROVE COMMENTS
+                ; VERS. 2.4 M. EBERHARD 13 OCTOBER 2016
+                ;   UNIFY ERROR MESSAGES, ADD GO RECORD TO AD COMMAND, ADD
+                ;   OPTION TO IGNORE GO RECORD ON AL COMMAND, VERIFY MEMORY
+                ;   WRITE ON HL COMMAND, IMPROVE LABELS
+                ; VERS. 2.5 M. EBERHARD 11 JUNE 2020
+                ;   USE 2732 EPROM TO ADD MT AND ? COMMANDS
+                ;==============================================================
+ 0000 =         FALSE	EQU	0
+ FFFF =         TRUE	EQU	NOT FALSE
+                
+                ;===================================
+                ; EPROM SIZE OPTION
+                ; SET EPROM32 TO TRUE FOR 2732 EPROM
+                ;===================================
+                
+ FFFF =         EPROM32 EQU	TRUE
+                
+                ;===============================================
+                ; CUSTOM PORT DEFINITION
+                ; CHANGE THESE VALUES FOR A CUSTOM TRANSFER PORT
+                ; THE CUSTOM PORT'S DATA PORT ADDRESS MUST BE
+                ; IMMEDIATELY AFTER ITS CTRL/STAT PORT. 
+                ;===============================================
+                ;DEFAULT IS 88-2SIO
+ 0010 =         CPRCTL	EQU	10H		;RX CTRL/STAT PORT
+ 0011 =         CPRDAT	EQU	CPRCTL+1	;RX DATA MUST BE CPRCTL+1
+ 0001 =         CPRRDY	EQU	01H		;RECEIVER READY FLAG
+                
+ 0010 =         CPTCTL	EQU	10H		;TX CTRL/STAT PORT
+ 0011 =         CPTDAT	EQU	CPTCTL+1	;TX DATA MUST BE CPTCTL+1
+ 0002 =         CPTRDY	EQU	02H		;TRANSMITTER READY FLAG
+                
+ 0000 =         CPSPOL	EQU	0		;0 FOR ACTIVE-HIGH FLAGS
+                				;1 FOR ATIVE-LOW FLAGS
+                ;*****
+                ;ASCII
+                ;*****
+ 0003 =         CTRLC	EQU	03H		;CONTROL-C
+ 0008 =         BS	EQU	08H		;BACKSPACE
+ 000D =         CR	EQU	0DH
+ 000A =         LF	EQU	0AH
+ 0027 =         QUOTE	EQU	27H		;SINGLE-QUOTE
+ 007F =         DEL	EQU	7FH		;DELETE
+                
+                ;---------------
+                ;PROGRAM EQUATES
+                ;---------------
+ 003E =         PROMPT	EQU	'>'	;PROMPT CHARACTER
+ 0003 =         CABKEY	EQU	CTRLC	;COMMAND ABORT CHARACTER
+ 0003 =         DTEXIT	EQU	CTRLC	;DEFAULT TERMINAL MODE EXIT CHR
+ 0020 =         PAUKEY	EQU	' '	;PAUSES DUMPING
+ 002E =         PCFIER	EQU	'.'	;CONSOLE PACIFIER CHARACTER
+                
+ 0050 =         LBSIZE	EQU	80	;INPUT LINE BUFFER SIZE
+ 0010 =         HRLEN	EQU	16	;INTEL HEX RECORD LENGTH FOR HD
+                
+ 0006 =         DTPORT	EQU	6	;DEFAULT TRANSFER PORT
+                
+                ;-------------------------------
+                ;SINGLE-CHARACTER ERROR MESSAGES
+                ;-------------------------------
+ 0043 =         CERMSG	EQU	'C'	;CHECKSUM/MARKER BYTE ERROR
+ 0048 =         HERMSG	EQU	'H'	;ILLEGAL HEX DIGIT
+ 004D =         MERMSG	EQU	'M'	;MEMORY WRITE VERIFY ERROR
+ 004F =         OERMSG	EQU	'O'	;MEMORY OVERLAY ERROR
+                
+                ;-----------------------------------
+                ;ALTAIR ABSOLUTE BINARY FILE EQUATES
+                ;-----------------------------------
+ 003C =         ALTPLR	EQU	3CH	;PROGRAM LOAD RECORD
+ 0078 =         ALTGOR	EQU	78H	;EOF/GO ADDRESS RECORD
+ 0055 =         ALTBNR	EQU	55H	;BEGIN/PROGRAM NAME (NOT SUPPORTED)
+ 000D =         ALTBND	EQU	0DH	;END-OF-NAME MARK (NOT SUPPORTED)
+ 003C =         ALTLDR	EQU	60	;LEADER/TRAILER LENGTH
+                
+                ;--------------------
+                ;SENSE SWITCH EQUATES
+                ;--------------------
+ 00FF =         SSWTCH	EQU	0FFH	;FRONT PANEL SWITCH REGISTER
+ 0007 =         LDMASK	EQU	007H	;LOAD DEVICE MASK
+                
+                ;--------------
+                ;88-SIO EQUATES
+                ;--------------
+                ;88-SIO REGISTERS	
+                
+ 0000 =         SIOCTL	EQU	00		;CONTROL PORT
+ 0000 =         SIOSTA	EQU	00		;STATUS
+ 0001 =         SIOTXD	EQU	01		;TRANSMIT DATA
+ 0001 =         SIORXD	EQU	01		;RECEIVE DATA
+                
+                ;STATUS REGISTER BITS
+                
+ 0001 =         SIOIDR	EQU	00000001B	;INPUT DEV RDY (RX BUF FULL)
+ 0004 =         SIOPE	EQU	00000100B	;PARITY ERROR
+ 0008 =         SIOFE	EQU	00001000B	;FRAMING ERROR
+ 0010 =         SIODOV	EQU	00010000B	;DATA OVERFLOW
+ 0080 =         SIOODR	EQU	10000000B	;OUTPUT DEV RDY (TX BUF EMPTY)
+                
+                ;--------------------------------------------------------
+                ;88-ACR (AUDIO CASSETTE RECORDER) EQUATES
+                ;NOTE: THE ALTAIR 88-ACR IS BUILT AROUND AN ALTAIR 88-SIO
+                ;--------------------------------------------------------
+                ;88-ACR REGISTERS	
+                
+ 0006 =         ACRCTL	EQU	06		;CONTROL PORT
+ 0006 =         ACRSTA	EQU	06		;STATUS
+ 0007 =         ACRTXD	EQU	07		;TRANSMIT DATA
+ 0007 =         ACRRXD	EQU	07		;RECEIVE DATA
+                
+                ;STATUS REGISTER BITS
+                
+ 0001 =         ACRIDR	EQU	00000001B	;INPUT DEV RDY (RX BUF FULL)
+ 0004 =         ACRPE	EQU	00000100B	;PARITY ERROR
+ 0008 =         ACRFE	EQU	00001000B	;FRAMING ERROR
+ 0010 =         ACRDOV	EQU	00010000B	;DATA OVERFLOW
+ 0080 =         ACRODR	EQU	10000000B	;OUTPUT DEV RDY (TX BUF EMPTY)
+                
+                ;---------------
+                ;88-2SIO EQUATES
+                ;---------------
+                ; 88-2SIO REGISTERS
+                
+ 0010 =         SIOBAS	EQU	10H
+ 0010 =         S2CTLA	EQU	SIOBAS		;ACIA A CONTROL OUTPUT PORT
+ 0010 =         S2STAA	EQU	SIOBAS		;ACIA A STATUS INPUT PORT
+ 0011 =         S2TXDA	EQU	SIOBAS+1	;ACIA A TX DATA REGISTER
+ 0011 =         S2RXDA	EQU	SIOBAS+1	;ACIA A RX DATA REGISTER
+ 0012 =         S2CTLB	EQU	SIOBAS+2	;ACIA B CONTROL OUTPUT PORT
+ 0012 =         S2STAB	EQU	SIOBAS+2	;ACIA B STATUS INPUT PORT
+ 0013 =         S2TXDB	EQU	SIOBAS+3	;ACIA B TX DATA REGISTER
+ 0013 =         S2RXDB	EQU	SIOBAS+3	;ACIA B RX DATA REGISTER
+                
+                ;MOTOROLA 6850 ACIA CTRL/STAT VALUES
+                
+ 0001 =         S2RDF	EQU	00000001B	;RX DATA REGISTER FULL
+ 0002 =         S2TBE	EQU	00000010B	;TX DATA REGISTER EMPTY
+                
+ 0003 =         S2RST	EQU	00000011B	;MASTER RESET
+ 0011 =         S22STP	EQU	00010001B	;2 STOP BITS, /16
+ 0015 =         S21STP	EQU	00010101B	;1 STOP BIT, /16
+                
+                ;--------------
+                ;88-PIO EQUATES
+                ;--------------
+                ;88-PIO REGISTERS	
+                
+ 0004 =         PIOCTL	EQU	04		;CONTROL PORT
+ 0004 =         PIOSTA	EQU	04		;STATUS
+ 0005 =         PIOTXD	EQU	05		;TRANSMIT DATA
+ 0005 =         PIORXD	EQU	05		;RECEIVE DATA
+                
+                ;STATUS REGISTER BITS
+                
+ 0002 =         PIORDF	EQU	00000010B	;RX DATA REGISTER FULL
+ 0001 =         PIOTDE	EQU	00000001B	;TX DATA REGISTER EMPTY
+                
+                ;-------------------------------------------
+                ;88-4PIO EQUATES
+                ;NOTE: THE 88-HSR USES PORT 1 OF THE 88-4PIO
+                ;-------------------------------------------
+                ;88-4PIO REGISTERS	
+                
+ 0020 =         P4CA0	EQU	20H		;PORT 0 SECTION A CTRL/STAT
+ 0021 =         P4DA0	EQU	21H		;PORT 0 SECTION A DATA
+ 0022 =         P4CB0	EQU	22H		;PORT 0 SECTION B CTRL/STAT
+ 0023 =         P4DB0	EQU	23H		;PORT 0 SECTION B DATA
+ 0024 =         P4CA1	EQU	24H		;PORT 1 SECTION A CTRL/STAT
+ 0025 =         P4DA1	EQU	25H		;PORT 1 SECTION A DATA
+ 0026 =         P4CB1	EQU	26H		;PORT 1 SECTION B CTRL/STAT
+ 0027 =         P4DB1	EQU	27H		;PORT 1 SECTION B DATA
+                
+                ;STATUS REGISTER BITS
+                
+ 0080 =         P4RDF	EQU	10000000B	;RX DATA REGISTER FULL
+ 0080 =         P4TDE	EQU	10000000B	;TX DATA REGISTER EMPTY
+ 0040 =         HSRRDF	EQU	01000000B	;RX DATA REGISTER FULL FOR HSR
+                
+                ;CONTROL REGISTER BITS
+                
+ 0001 =         P4C1C0	EQU	00000001B	;C1 CONTROL BIT 0
+ 0002 =         P4C1C1	EQU	00000010B	;C1 CONTROL BIT 1
+ 0004 =         P4DDR	EQU	00000100B	;DATA DIRECTION REGISTER
+ 0008 =         P4C2C3	EQU	00001000B	;C2 CONTROL BIT 3
+ 0010 =         P4C2C4	EQU	00010000B	;C2 CONTROL BIT 4
+ 0020 =         P4C2C5	EQU	00100000B	;C2 CONTROL BIT 5
+ 0040 =         P4IC2	EQU	01000000B	;C2 INTERRUPT CONTROL BIT
+ 0080 =         P4IC1	EQU	10000000B	;C1 INTERRUPT CONTROL BIT
+                
+                ;4PIO INITIALIZATION
+                
+ 002C =         P4INIT	EQU	P4C2C5+P4C2C3+P4DDR	;2CH
+                			;BITS 0,1: C1 INPUT ACTIVE LOW, INT OFF
+                			;BIT 2: ACCESS DATA REG
+                			;BITS 3-5: C2 OUTPUT HANDSHAKE
+                
+                ;-----------------------------------------------------------
+                ;ALTAIR 8800 FLOPPY DISK CONTROLLER EQUATES (THESE ARE THE
+                ;SAME FOR THE 88-DCDD CONTROLLER AND THE 88-MDS CONTROLLER.)
+                ;-----------------------------------------------------------
+ 0008 =         DENABL	EQU	08H		;DRIVE ENABLE OUTPUT
+ 0080 =         DDISBL	  EQU	  80H		  ;DISABLE DISK CONTROLLER
+                
+ 0008 =         DSTAT	EQU	08H		;STATUS INPUT (ACTIVE LOW)
+ 0001 =         ENWDAT	  EQU	  01H		  ;-ENTER WRITE DATA
+ 0002 =         MVHEAD	  EQU	  02H		  ;-MOVE HEAD OK
+ 0004 =         HDSTAT	  EQU	  04H		  ;-HEAD STATUS
+ 0008 =         DRVRDY	  EQU	  08H		  ;-DRIVE READY
+ 0020 =         INTSTA	  EQU	  20H		  ;-INTERRUPTS ENABLED
+ 0040 =         TRACK0	  EQU	  40H		  ;-TRACK 0 DETECTED
+ 0080 =         NRDA	  EQU	  80H		  ;-NEW READ DATA AVAILABLE
+                
+ 0009 =         DCTRL	EQU	09H		  ;DRIVE CONTROL OUTPUT
+ 0001 =         STEPIN	  EQU	  01H		  ;STEP-IN
+ 0002 =         STEPOT	  EQU	  02H		  ;STEP-OUT
+ 0004 =         HEDLOD	  EQU	  04H		  ;8" DISK: LOAD HEAD
+                				  ;MINIDISK: RESTART 6.4 S TIMER
+ 0008 =         HDUNLD	  EQU	  08H		  ;UNLOAD HEAD (8" ONLY)
+ 0010 =         IENABL	  EQU	  10H		  ;ENABLE SECTOR INTERRUPT
+ 0020 =         IDSABL	  EQU	  20H		  ;DISABLE INTERRUPTS
+ 0080 =         WENABL	  EQU	  80H		  ;ENABLE DRIVE WRITE CIRCUITS
+                
+ 0009 =         DSECTR	EQU	09H		;SECTOR POSITION INPUT
+ 0001 =         SVALID	  EQU	  01H		  ;SECTOR VALID (1ST 30 US
+                				  ;..OF SECTOR PULSE)
+ 003E =         SECMSK	  EQU	  3EH		  ;SECTOR MASK FOR MDSEC
+                
+ 000A =         DDATA	EQU	0AH		;DISK DATA (INPUT/OUTPUT)
+                
+                ;FLOPPY DISK PARAMETERS
+                
+ 0080 =         BPS	EQU	128		;DATA BYTES/SECTOR
+ 0010 =         MDSPT	EQU	16		;MINIDISK SECTORS/TRACK
+                				;THIS CODE ASSUMES SPT FOR 8"
+                				;DISKS = MDSPT * 2.
+                
+ 0003 =         HDRSIZ	EQU	3		;HEADER BYTES BEFORE DATA
+ 0002 =         TLRSIZ	EQU	2		;TRAILER BYTES READ AFTER DATA
+                
+ 0085 =         SECSIZ	EQU	BPS+HDRSIZ+TLRSIZ ;TOTAL BYTES/SECTOR
+                
+ 0010 =         RETRYS	EQU	16		;MAX RETRIES PER SECTOR
+                
+                ;------------------------------------
+                ;88-HDSK DATAKEEPER HARD DISK EQUATES
+                ;------------------------------------
+                
+                ;88-HDSK PORTS (THE INTERFACE BOARD IS ACTUALLY AN 88-4PIO.)
+                
+ 00A0 =         CREADY	EQU	0A0H	;IN: CTLR READY FOR COMMAND (BIT7)
+ 00A1 =         CSTAT	EQU	0A1H	;IN: ERROR FLAGS, RESET CREADY
+ 00A2 =         ACSTA	EQU	0A2H	;IN: COMMAND ACK (BIT 7)
+ 00A3 =         ACMD	EQU	0A3H	;IN: RESET COMMAND ACK
+                			;OUT: COMMAND HIGH BYTE/INITIATE
+ 00A4 =         CDSTA	EQU	0A4H	;IN: DATA/STAT AVAILABLE AT CDATA
+ 00A5 =         CDATA	EQU	0A5H	;IN: DISK DATA OR STATUS FROM CTLR
+ 00A6 =         ADSTA	EQU	0A6H	;IN: ADATA PORT AVAILABLE (BIT 7)
+ 00A7 =         ADATA	EQU	0A7H	;OUT: COMMAND LOW BYTE
+                
+                ;88-HDSK ACMD:ADATA COMMANDS
+                
+ 0024 =         BINIT	EQU	24H	;BITS 0,1: C1 INPUT ACTIVE LOW, INT OFF
+                			;BIT 2: ACCESS DATA REG
+                			;BITS 3-5: C2 INPUT HANDSHAKE
+                
+                
+ 002C =         CINIT	EQU	2CH	;BITS 0,1: C1 INPUT ACTIVE LOW, INT OFF
+                			;BIT 2: ACCESS DATA REG
+                			;BITS 3-5: C2 OUTPUT HANDSHAKE
+                
+ 0000 =         CSEEK	EQU	00H	;BITS 15:12 = 0000B
+                			;BITS 11:10 = UNIT #
+                			;BITS  9:0  = CYLINDER #
+                
+ 0030 =         CRDSEC	EQU	30H	;BITS 15:12 = 0011B
+                			;BITS 11:10 = UNIT #
+                			;BITS  9:8  = BUFFER #
+                			;BIT   7:6  = PLATTER #
+                			;BITS    5  = SIDE #
+                			;BITS  4:0  = SECTOR #
+                
+ 0020 =         CSIDE	 EQU	  020H	  ;SIDE SELECT FOR CRDSEC
+ 00C0 =         CFPLTR	 EQU	  0C0H	  ;PLATTER MASK FOR CRDSEC
+ 000C =         CUNIT	 EQU	  00CH	  ;UNIT MASK FOR CSEEK & CRDSEC
+                
+ 0050 =         CRDBUF	EQU	50H	;BITS 15:12 = 0101B
+                			;BITS 11:10 = NOT USED
+                			;BITS  9:8  = BUFFER #
+                			;BITS  7:0  = # BYTES TO TRANSFER
+                			;(00 MEANS 256)
+                
+                ;88-HDSK CSTAT ERROR BITS
+                
+ 0001 =         ERDNR	EQU	01H	;DRIVE NOT READY
+ 0002 =         ERBADS	EQU	02H	;ILLEGAL SECTOR
+ 0004 =         ERSCRC	EQU	04H	;CRC ERROR DURING SECTOR READ
+ 0008 =         ERHCRC	EQU	08H	;CRC ERROR DURING HEADER READ
+ 0010 =         ERSWRG	EQU	10H	;HEADER HAS WRONG SECTOR
+ 0020 =         ERCWRG	EQU	20H	;HEADER HAS WRONG CYLINDER
+ 0040 =         ERHWRG	EQU	40H	;HEADER HAS WRONG HEAD
+ 0080 =         WPROT	EQU	80H	;WRITE PROTECT
+ 007F =         ERMASK	EQU	7FH	;ALL THE ACTUAL ERROR BITS
+                
+                ;88-HDSK CONSTANTS
+                
+ 0028 =         OSOFF	EQU	40	;PAGE 0 OFFSET TO OPSYS POINTERS
+ 0018 =         HDSPT	EQU	24	;SECTORS PER TRACK
+ 0000 =         DBUFR	EQU	0	;DEFAULT CONTROLLER BUFFER: 0-3
+                			;CODE GETS LONGER IF <>0
+                
+                ;*****************
+                ;MEMORY ALLOCATION
+                ;*****************
+ 0000 =         DMAADR	EQU	00000H		;DISK LOAD/EXECUTION ADDRESS
+                				;(CODE ASSUMES DMAADR=0)
+ F800 =         MONADR	EQU	0F800H		;ADDRESS OF MONITOR
+ FC00 =         HDBADR	EQU	0FC00H		;BEGINNING OF HDBL PROM
+ FE00 =         MBLADR	EQU	0FE00H		;MBL SUBSYSTEM ADDRESS
+ FF00 =         DBLADR	EQU	0FF00H		;CDBL SUBSYSTEM ADDRESS
+                
+                 IF EPROM32
+ F000 =         MON32A	EQU	0F000H		;BASE OF 2732 MONITOR EXTENSION
+                 ENDIF	;EPROM32
+                
+                ;------------------------------------------------
+                ;ADDRESS OFFSETS OF COMPONENTS IN AMON'S RAM PAGE
+                ;------------------------------------------------
+ 0000 =         RAMCOD	EQU	0		;RELOCATED CODE AT BOTTOM
+ 007B =         RAMBUF	EQU	100H-SECSIZ	;EXACTLY ROOM FOR 1 COMPLETE SECTOR
+ 007B =         STACK	EQU	RAMBUF		;STACK GROWS DOWN FROM HERE
+ 0010 =         MINSTK	EQU	10H		;MINIMUM STACK SIZE
+                
+                ;FLOPPY DISK SECTOR BUFFER COMPONENT OFFSETS
+                
+ 007C =         SFSIZE	EQU	RAMBUF+1	;FILE SIZE
+ 007E =         SDATA	EQU	RAMBUF+HDRSIZ	;SECTOR DATA
+ 00FE =         SMARKR	EQU	SDATA+BPS	;MARKER BYTE
+ 00FF =         SCKSUM	EQU	SMARKR+1	;CHECKSUM BYTE
+                
+                ;======================================================
+                ; HELP THE EPROM PROGRAMMER AUTO-DETECT THE MEMORY PAGE
+                ;======================================================
+                 IF EPROM32
+ F000           	ORG	MON32A		;BASE OF 2732 MONITOR EXTENSION
+ F000 00        	DB 0
+                 ENDIF	;EPROM32
+                
+                ;=============================
+                ;= COLD-START INITIALIZATION =
+                ;=============================
+ F800           	ORG	MONADR		;MONITOR ROM START
+                
+ F800 01BCF8    	LXI	B,INIT2		;RETURN ADDRESS
+                
+                ;FALL INTO INIT
+                
+                ;***SPECIAL SUBROUTINE************************
+                ; INITIALIZATION
+                ;     FIND RAM FOR THE STACK AND SECTOR BUFFER
+                ;     INSTALL RAM CODE
+                ;     INITIALIZE I/O PORTS
+                ; ON ENTRY:
+                ;   BC = RETURN ADDRESS
+                ; ON EXIT:
+                ;    E = 0
+                ;   SP = ADDRESS OF NEW STACK
+                ;   ALL STANDARD ALTAIR I/O PORTS INITIALIZED
+                ;   INTERRUPTS DISABLED
+                ; TRASHES PSW,D,HL
+                ;*********************************************
+ F803 F3        INIT:	DI			;NO INTERRUPTS PLEASE
+                
+                ;----------------------------------------------
+                ;HUNT FOR THE HIGHEST RAM PAGE
+                ;THIS ASSUMES AT LEAST ONE 256-BYTE PAGE OF RAM
+                ;AND THAT IF ONE BYTE WITHIN EACH PAGE IS RAM
+                ;THEN THE OTHER 255 BYTES ARE RAM TOO.
+                ;----------------------------------------------
+ F804 2100FF    	LXI	H,0FF00H
+                
+ F807 24        CSLOOP:	INR	H		;NEXT RAM PAGE
+                
+ F808 7E        	MOV	A,M		;ORIGINAL RAM DATA
+ F809 2F        	CMA
+ F80A 77        	MOV	M,A		;WRITE INVERTED
+ F80B BE        	CMP	M		;CORRECT?
+ F80C 2F        	CMA
+ F80D 77        	MOV	M,A		;PUT ORIGINAL DATA BACK
+ F80E CA07F8    	JZ	CSLOOP		;KEEP LOOKING IF RAM WRITE OK
+                
+ F811 25        	DCR	H		;POINT TO LAST GOOD RAM PAGE
+                
+                ;-----------------------------------------
+                ;RELOCATE  AND INSTALL RAM CODE
+                ;THIS LOOP MOVES MORE BYTES THAN NECESSARY
+                ;TO INSTALL THE ACTUAL RAM CODE. THE EXTRA
+                ;BYTES LAND IN THE (UNINITIALIZED) STACK
+                ;SPACE AND BUFFER SPACE.
+                ;ON ENTRY:
+                ;   H = DESTINATION ADDRESS HIGH BYTE
+                ; ON EXIT:
+                ;   E = 0
+                ;-----------------------------------------
+ F812 1153F8    	LXI	D,RIOCOD	;RAM CODE SOURCE
+                
+ F815 1A        RCLOOP:	LDAX	D
+ F816 BA        	CMP	D		;NEED TO RELOCATE AN ADDRESS?
+ F817 C221F8    	JNZ	RCL1
+                
+ F81A 2B        	DCX	H		;BACK UP TO FIX LOW ADDRESS BYTE
+ F81B 7E        	MOV	A,M
+ F81C D653      	SUI	(RIOCOD-RAMCOD) AND 0FFH ;LOW BYTE OF OFFSET
+ F81E 77        	MOV	M,A
+ F81F 23        	INX	H
+                
+ F820 7C        	MOV	A,H		;RELOCATE HIGH BYTE
+                
+ F821 77        RCL1:	MOV	M,A
+                
+ F822 2C        	INR	L
+ F823 1C        	INR	E		;END WITH E=0 FOR INIT EXIT
+ F824 C215F8    	JNZ	RCLOOP	
+                
+                ;-----------------------------------------------
+                ;CREATE STACK, AND PUSH THE GIVEN RETURN ADDRESS
+                ;-----------------------------------------------
+ F827 2E7B      	MVI	L,STACK		;PUT STACK IN RAM PAGE
+ F829 F9        	SPHL
+ F82A C5        	PUSH	B		;PUSH OUR RETURN ADDRESS
+                
+                ;-------------------------------------
+                ;RESET ALL STANDARD ALTAIR I/O DEVICES
+                ;THE WAY THAT MBL DOES
+                ;-------------------------------------
+                ;MAKE 4PIO 'A' CHANNELS INPUTS AND 'B' CHANNELS OUTPUTS
+                
+ F82B AF        	XRA	A
+ F82C D320      	OUT	P4CA0		;ACCESS 4PIO PORT 0A DDR
+ F82E D321      	OUT	P4DA0		;SET 4PIO PORT 0A AS INPUT
+                
+ F830 D322      	OUT	P4CB0		;ACCESS 4PIO PORT 0B DDR
+ F832 2F        	CMA			;0FFH
+ F833 D323      	OUT	P4DB0		;SET 4PIO PORT 0B AS OUTPUT
+                
+                ;SET UP THE OTHER 3 4PIO PORTS ALL THE SAME
+                
+ F835 3E2C      	MVI	A,P4INIT
+ F837 D320      	OUT	P4CA0		;4PIO PORT 0A CONTROL
+ F839 D322      	OUT	P4CB0		;4PIO PORT 0B CONTROL
+                
+                ;SEND RESET COMMAND TO BOTH 2SIO PORTS
+                
+ F83B 3E03      	MVI	A,S2RST		;2SIO RESET
+ F83D D310      	OUT	S2CTLA		;2SIO PORT 0
+ F83F D312      	OUT	S2CTLB		;2SIO PORT 1
+                
+                ;SET UP BOTH 2SIO PORTS: 8 DATA BITS, 2 STOP BITS, NO PARITY, 
+                ;CLOCK DIVIDE BY 16 
+                
+ F841 3E11      	MVI	A,S22STP	;8N2, /16
+ F843 D310      	OUT	S2CTLA		;2SIO PORT 0 CONTROL
+ F845 D312      	OUT	S2CTLB		;2SIO PORT 1 CONTROL
+                
+                ;----------------------------------------------------
+                ;FALL INTO TPCMD TO SET THE DEFAULT TRANSFER PORT AND
+                ;"RETURN" TO THE ADDRESS PROVIDED IN BC ON ENTRY.
+                ;---------------------------------------------------- 
+ F847 2E06      	MVI	L,DTPORT	;DEFAULT TRANSFER PORT
+                
+                ;***COMMAND ROUTINE********************
+                ; TP [<PORT>] SET TRANSFER PORT
+                ;  PORT   DEVICE
+                ;   0    88-2SIO PORT 0, 2 STOP BITS
+                ;   1    88-2SIO PORT 0, 2 STOP BITS
+                ;   2    88-SIO
+                ;   3    88-ACR
+                ;   4    88-4PIO PORT 0
+                ;   5    88-PIO
+                ;   6    88-2SIO PORT 1, 2 STOP BITS
+                ;   7    CUSTOM PORT
+                ;
+                ; ON ENTRY:
+                ;   L=PORT NUMBER (UPPER DIGIT IGNORED)
+                ; TRASHES PSW,BC,HL
+                ;**************************************
+ F849 7D        TPCMD:	MOV	A,L			;GET PORT
+ F84A E607      	ANI	7			;MAKE IT A LEGAL VALUE
+                
+ F84C 210000    	LXI	H,0			;FIND ADDRESS OF RSETP
+ F84F 39        	DAD	SP			;...LOCATED IN RAM
+ F850 2E00      	MVI	L,RSETP-RIOCOD+RAMCOD
+ F852 E9        	PCHL				;RUN RSETP (WITH VALUE IN A)
+                
+                ;==============================================================
+                ; AMON RAM I/O CODE
+                ; THIS CODE MUST BE IN RAM EITHER BECAUSE IT GETS MODIFIED OR
+                ; BECAUSE IT MAY GET CALLED AFTER AN IN FROM PORT FF (WHICH MAY
+                ; DISABLE THE PROM). ALL OF RIOCOD MUST BE IN THE SAME PAGE.
+                ;
+                ; THE ROM VERSIONS OF SOME OF THESE ROUTINES ALSO DOUBLE AS THE
+                ; CONSOLE I/O ROUTINES, WHEN CALLED IN ROM.
+                ;==============================================================
+                RIOCOD:
+                
+                ;---RAM SUBROUTINE--------------------------------------------
+                ; PATCH THE TRANSFER PORT ROUTINES WITH THE CORRECT PARAMETERS
+                ; FOR THE LOAD PORT THAT IS SPECIFIED IN A.
+                ; ON ENTRY:
+                ;    A = TRANSFER PORT VALUE (VALUES COMPATIBLE WITH MITS
+                ;        LOADERS FROM REV 3.0 ONWARD.). A < 8
+                ; TRASHES PSW,BC,HL
+                ;-------------------------------------------------------------
+ F853 019BF8    RSETP:	LXI	B,PTABLE	;LOOKUP TABLE
+                
+ F856 87        	ADD	A		;4 BYTES/ENTRY
+ F857 87        	ADD	A
+ F858 81        	ADD	C		;LOOK UP IN PTABLE (CLR CARRY)
+ F859 4F        	MOV	C,A		;BC=PTABLE(PORT VALUE)
+                
+                ;SET UP THE INPUT PORT ROUTINE
+                
+ F85A 0A        	LDAX	B		;INPUT DATA PORT & CMA FLAG
+ F85B 1F        	RAR			;MOVE CMA FLAG INTO CARRY
+ F85C 328CF8    	STA	TPIDP+1		;INSTALL DATA PORT ADDRESS
+                
+                ;HL GETS THE STATUS PORT (IN L) AND EITHER NOP OR CMA (IN H)
+                
+ F85F 2600      	MVI	H,NOP		;NOP INSTRUCTION
+ F861 D266F8    	JNC	RSETP1
+ F864 262F      	MVI	H,CMA		;CMA INSTRUCTION
+                RSETP1:
+                
+ F866 3D        	DCR	A		;STATUS PORT = DATA PORT-1
+ F867 6F        	MOV	L,A		;INSTALL STATUS PORT ADDRESS
+                
+                ;SET THE STATUS PORT AND EITHER NOP OR CMA INSTRUCTION
+                
+ F868 2280F8    	SHLD	TPISP+1		;STATUS PORT AND NOP/CMA
+                
+ F86B 0C        	INR	C		;NEXT TABLE ENTRY IS
+ F86C 0A        	LDAX	B		;..THE DATA AVAILABLE MASK
+ F86D 3283F8    	STA	TPIMSK+1	;INSTALL MASK
+                
+                ;SET UP THE OUTPUT PORT ROUTINE
+                
+ F870 0C        	INR	C		;NEXT TABLE ENTRY IS
+ F871 0A        	LDAX	B		;..THE DATA OUTPUT PORT ADDRESS
+ F872 3299F8    	STA	TPODP+1		;INSTALL DATA PORT ADDRESS
+                
+ F875 3D        	DCR	A		;STATUS PORT = DATA PORT-1
+ F876 6F        	MOV	L,A		;INSTALL STAT PORT ADDRESS
+ F877 2290F8    	SHLD	TPOSP+1		;STATUS PORT AND NOP/CMA
+                
+ F87A 0C        	INR	C		;NEXT TABLE ENTRY IS
+ F87B 0A        	LDAX	B		;..THE TRANSMITTER READY MASK
+ F87C 3293F8    	STA	TPOMSK+1	;INSTALL READY MASK
+                
+                ;	RET
+                
+                ;FALL INTO RTPIS TO RETURN, SAVING ONE BYTE
+                
+                ;===SUBROUTINE===============
+                ; GET CONSOLE KEYBOARD STATUS
+                ; ON EXIT:
+                ;   Z CLEAR IF DATA AVAILABLE
+                ;============================
+                KSTAT:
+                
+                ;FALL INTO THE ROM VERSION OF TRANSFER PORT INPUT STATUS
+                
+                ;---RAM SUBROUTINE----------------
+                ; GET TRANSFER PORT INPUT STATUS
+                ; THIS CODE GETS MODIFIED BY RSETP
+                ; ON EXIT:
+                ;   Z CLEAR IF DATA AVAILABLE
+                ;   A=0 AND Z SET IF NOT
+                ;---------------------------------
+                RTPIS:	
+ F87F DB10      TPISP:	IN	S2STAA		;(STATUS PORT ADDRESS)READ STATUS
+ F881 00        TPINOP:	NOP			;(MAY GET MODIFIED TO CMA)
+ F882 E601      TPIMSK:	ANI	S2RDF		;(PORT MASK)
+ F884 C9        	RET
+                
+                ;---RAM SUBROUTINE------------------------------
+                ; WAIT FOR AND GET A BYTE FROM THE TRANSFER PORT
+                ; THIS CODE GETS MODIFIED BY RSETP
+                ; ON EXIT:
+                ;   A = INPUT CHARACTER
+                ;   Z CLEARED
+                ;-----------------------------------------------
+ F885 CD7FF8    RTPIN:	CALL	RTPIS
+ F888 CA85F8    	JZ	RTPIN		;WAIT FOR DATA
+                
+                ;FALL INTO RTPIF
+                
+                ;---RAM SUBROUTINE-----------------------------------
+                ; GET/FLUSH A BYTE FROM THE TRANSFER PORT IMMEDIATELY
+                ; THIS CODE GETS MODIFIED BY RSETP
+                ; ON ENTRY:
+                ;   TRANSFER PORT RX DATA IS READY
+                ; ON EXIT:
+                ;   A = INPUT CHARACTER
+                ;   Z CLEARED
+                ;----------------------------------------------------
+                RTPIF:				;CALL HERE TO FLUSH PORT
+ F88B DB11      TPIDP:	IN	S2RXDA		;(DATA PORT PLACE)GET DATA BYTE
+                
+ F88D C9        	RET			;RESULT IN A
+                
+                ;===SUBROUTINE==============
+                ; SEND BYTE TO CONSOLE
+                ; ON ENTRY:
+                ;    A = BYTE TO SEND
+                ; ON EXIT:
+                ;    ALL REGISTERS PRESERVED
+                ;===========================
+                PRINTA:
+                
+                ;FALL INTO THE ROM VERSION OF TRANSFER PORT TX DATA
+                
+                ;---RAM SUBROUTINE----------------
+                ; SEND A BYTE TO THE TRANSFER PORT
+                ; THIS CODE GETS MODIFIED BY RSETP
+                ; ON ENTRY:
+                ;    A = BYTE TO SEND
+                ; ALL REGISTERS PRESERVED
+                ;---------------------------------
+ F88E F5        RTPOUT:	PUSH	PSW
+                
+                WAITPO:
+ F88F DB10      TPOSP:	IN	S2STAA		;(STATUS PORT ADDRESS)READ STATUS
+ F891 00        TPONOP:	NOP			;(MAY GET MODIFIED TO CMA)
+ F892 E602      TPOMSK:	ANI	S2TBE		;(TX PORT MASK)
+ F894 CA8FF8    	JZ	WAITPO
+                
+ F897 F1        	POP	PSW
+ F898 D311      TPODP:	OUT	S2TXDA		;(DATA PORT PLACE)
+ F89A C9        	RET	
+                
+                ;---RAM TABLE------------------------------------------------
+                ;PORT PARAMETERS: ONE 4-BYTE ENTRY FOR EACH PORT:
+                ; BYTE 1 = RX DATA PORT ADDRESS * 2 + CMA FLAG
+                ; BYTE 2 = READY MASK FOR DATA INPUT
+                ; BYTE 3 = TX DATA PORT ADDRESS
+                ; BYTE 4 = READY MASK FOR DATA OUTPUT
+                ; ASSUMPTIONS:
+                ;  THE CONTROL PORT FOR TX OR RX IMMEDIATELY PRECEDE THE DATA
+                ;    PORT.
+                ;  THE POLARITY OF THE TX READY STATUS BIT IS THE SAME AS THE
+                ;    RX EMPTY STATUS BIT.
+                ;  RX PORT ADDRESSES ARE ALL < 80H
+                ;------------------------------------------------------------
+ F89B 22011102  PTABLE:	DB	S2RXDA*2,S2RDF,S2TXDA,S2TBE	;0:2SIO A
+ F89F 22011102  	DB	S2RXDA*2,S2RDF,S2TXDA,S2TBE	;1:2SIO A
+ F8A3 03010180  	DB	SIORXD*2+1,SIOIDR,SIOTXD,SIOODR	;2:SIO
+ F8A7 0F010780  	DB	ACRRXD*2+1,ACRIDR,ACRTXD,ACRODR	;3:ACR
+ F8AB 42802380  	DB	P4DA0*2,P4RDF,P4DB0,P4TDE	;4:4PIO PORT 0
+ F8AF 0A020501  	DB	PIORXD*2,PIORDF,PIOTXD,PIOTDE	;5:PIO
+ F8B3 26011302  	DB	S2RXDB*2,S2RDF,S2TXDB,S2TBE	;6:2SIO B
+                
+                ;8TH ENTRY IS A CUSTOM PORT, DEFINED ABOVE
+                
+ F8B7 22011102  	DB	CPRDAT*2+CPSPOL,CPRRDY,CPTDAT,CPTRDY
+                
+                ;==============================================================
+                ; RAM VARIABLES
+                ;==============================================================
+ F8BB 00        TTYPE:	DB	0	;0 (EVEN) MEANS TERMINAL (BACKSPACING)
+                			;1 (ODD) MEANS TELETYPE (NO BACKSPACE)
+                
+                ;===ASSEMBLY CHECK=======================================
+                ; ALL OF RIOCOD MUST BE IN THE SAME 256-BYTE PAGE OF PROM
+                ;========================================================
+ F8BC =         RCEND	EQU	$
+                
+                 IF (RCEND-1)/256-(RIOCOD/256)
+                	ERROR: RAM I/O CODE IS NOT ALL IN ONE PAGE
+                 ENDIF
+                
+                ;===ASSEMBLY CHECK======================
+                ; ALL OF RIOCOD MUST FIT IN RAM TOGETHER
+                ; WITH THE STACK AND THE RAM BUFFER
+                ;=======================================
+                 IF (((RCEND-1)-RIOCOD)+MINSTK+SECSIZ)/256
+                	ERROR: RAM I/O CODE IS TOO LARGE
+                 ENDIF
+                
+                ;==========================================
+                ;= COOL-START INITIALIZATION              =
+                ;= REPAIR STACK, PRINT BANNER, GO TO MAIN =
+                ;= ON ENTRY:                              =
+                ;=   SP POINTS TO A VALID STACK ADDRESS   =
+                ;==========================================
+ F8BC CD4AFD    INIT2:	CALL	CILPRT		;PRINT BANNER
+ F8BF 414D4F4E20	DB	'AMON  2.5 by M. Eberhard',CR,LF
+ F8D9 52414D3AA0	DB	'RAM:',' '+80H
+                
+                ;CILPRT RETURNS WITH Z FLAG CLEARED
+                ;ANNOUNCE ADDRESS OF THE FIRST BYTE OF RAM PAGE
+                
+ F8DE AF        	XRA	A		;SET Z FLAG
+                
+                ;FALL INTO CABORT WITH Z SET AND A=0
+                
+                ;***************************************************
+                ; COMMAND ABORT: FIX STACK, GO TO MAIN
+                ; ON ENTRY:
+                ;   SP POINTS TO A VALID STACK ADDRESS
+                ;   Z SET AND A=0 IF STACK ADDRESS SHOULD BE PRINTED
+                ;***************************************************
+ F8DF CDE9FF    CABORT:	CALL	RAMPAG		;FIND STACK (A=0 IF Z SET)
+ F8E2 CCF5FC    	CZ	PHLCHX		;PERHAPS PRINT HL ON CONSOLE
+                
+ F8E5 2E7B      	MVI	L,STACK		;POINT TO BOTTOM OF STACK
+ F8E7 F9        	SPHL			;FIX STACK
+                
+                ;FALL INTO MAIN
+                
+                ;***********************************
+                ; COMMAND PROCESSOR MAIN ENTRY POINT
+                ; GET AND PROCESS COMMANDS
+                ;***********************************
+                ;PRINT THE PROMPT, AND GET A LINE OF KEYBOARD INPUT
+                
+ F8E8 01E8F8    MAIN:	LXI	B,MAIN		;CREATE COMMAND-RETURN
+ F8EB C5        	PUSH	B		;..ADDRESS ON THE STACK
+                
+ F8EC CD4AFD    	CALL	CILPRT		;PRINT CR,LF, PROMPT
+ F8EF BE        	DB	PROMPT+80H
+                
+ F8F0 CDD9FB    	CALL	GETLIN		;GET USER INPUT LINE
+                				;DE=BEGINNING OF LINE
+                				;Z SET IF NO CHARACTER FOUND
+                				;0 AT END OF LINE
+                
+ F8F3 F3        	DI			;INTE LIGHT OFF (CANCEL ERROR)
+ F8F4 C8        	RZ			;NO COMMAND? JUST IGNORE.
+                
+                ;CHECK COMMAND LIST, AND EXECUTE THE COMMAND IF FOUND
+                
+ F8F5 EB        	XCHG			;COMMAND ADDRESS TO HL
+ F8F6 11FEEF    	LXI	D,COMTAB-2	;POINT TO COMMAND TABLE
+                
+ F8F9 4E        	MOV	C,M		;1ST COMMAND CHR IN C
+ F8FA 23        	INX	H		;2ND COMMAND CHR IN M
+                
+                ;SEARCH THROUGH TABLE AT DE FOR A 2-CHARACTER MATCH OF C,M
+                ;ALLOWING UPPERCASE OR LOWERCASE LETTERS.
+                
+ F8FB 13        NXTCOM:	INX	D		;SKIP OVER ADDRESS
+ F8FC 13        	INX	D
+ F8FD 1A        	LDAX	D
+ F8FE B7        	ORA	A		;TEST FOR TABLE END
+ F8FF CAF4FF    	JZ	CMDERR		;NOT IN TABLE
+                
+ F902 A9        	XRA	C		;TEST FIRST CHARACTER
+ F903 47        	MOV	B,A		;TEMP SAVE RESULT
+ F904 13        	INX	D		;2ND TABLE CHARACTER
+ F905 1A        	LDAX	D
+ F906 AE        	XRA	M		;TEST 2ND CHARACTER
+                
+ F907 13        	INX	D		;POINT TO ADDRESS OFFSET
+                
+ F908 B0        	ORA	B			;BOTH CHARACTERS MATCH?
+ F909 E6DF      	ANI	('a'-'A') XOR 0FFH	;LOWERCASE IS OK
+ F90B C2FBF8    	JNZ	NXTCOM			;NO MATCH: KEEP LOOKING
+                
+ F90E 23        	INX	H		;SKIP PAST 2-LETTER COMMAND
+                
+                ;GOT A MATCH. GET COMMAND ROUTINE ADDRESS, PUT IT ON THE STACK
+                
+ F90F EB        	XCHG			;(HL)=ADDRESS OF CMD ROUTINE
+                				;DE=INPUT POINTER
+                
+ F910 4E        	MOV	C,M		;ADDRESS LOW BYTE
+ F911 23        	INX	H
+                
+ F912 7E        	MOV	A,M		;ADDRESS HIGH BYTE
+ F913 F680      	ORI	80H		;CLEAR NON-HEX FLAG BIT
+ F915 47        	MOV	B,A		;..TO MAKE LEGIT ADDRESS
+                
+ F916 C5        	PUSH	B		;COMMAND ROUTINE ADDRESS
+                
+                ;IF THE MSB OF THE ROUTINE ADDRESS WAS ZERO (THIS BIT USED AS
+                ;A FLAG), THEN ANY PARAMETERS ARE NOT HEX - SO GO DIRECTLY TO
+                ;THE COMMAND EXECUTION ROUTINE.
+                
+ F917 BE        	CMP	M		;NON-HEX?
+ F918 C0        	RNZ			;Y: GO DIRECTLY TO ROUTINE
+                
+                ;GET THE FOLLOWING HEX PARAMETER (IF ANY) AND PUT IT IN HL.
+                ;SET THE CARRY FLAG IF NO PARAMETER PRESENT.
+                ;LEAVE DE POINTING TO THE 1ST CHR AFTER THE 1ST PARAMETER.
+                ;'RETURN' TO THE COMMAND ROUTINE ON THE STACK.
+                
+                ;SKIP INTO FNDHEX
+                
+ F919 21        	DB	21H		;'LXI H' OPCODE SKIPS 2
+                
+                ;***SUBROUTINE**************************************
+                ; SCAN PAST BLANKS AND GET A HEX VALUE
+                ; ON ENTRY:
+                ;   DE=ADDRESS OF NEXT ITEM IN THE INPUT LINE BUFFER
+                ; ON EXIT:
+                ;   HL=VALUE
+                ;   DE ADVANCED PAST CHARACTER
+                ;   TOP-OF-STACK = PRIOR HL VALUE
+                ;   Z SET, CARRY CLEAR IF VALUE
+                ;   CARRY SET AND A=HL=0 IF NO VALUE FOUND
+                ;***************************************************
+ F91A E3        PHFHEX:	XTHL			;PUSH HL
+ F91B E5        	PUSH	H		;..BENEATH RETURN ADDRESS
+                
+                ;FALL INTO FNDHEX
+                
+                ;***SUBROUTINE**************************************
+                ; SCAN PAST BLANKS AND GET A HEX VALUE
+                ; ON ENTRY:
+                ;   DE=ADDRESS OF NEXT ITEM IN THE INPUT LINE BUFFER
+                ; ON EXIT:
+                ;   HL = HEX VALUE
+                ;   DE ADVANCED PAST CHARACTER
+                ;   TOP-OF-STACK = PRIOR HL VALUE
+                ;   Z SET, CARRY CLEAR IF VALUE
+                ;   CARRY SET AND A=HL=0 IF NO VALUE FOUND
+                ;***************************************************
+ F91C 210000    FNDHEX:	LXI	H,0		;DEFAULT VALUE
+ F91F CDEDFB    	CALL	SSPACE		;SKIP SPACES TO FIND 1ST DIGIT
+ F922 37        	STC			;CARRY SET IF NO DIGITS
+ F923 C8        	RZ
+                
+ F924 1A        FHEXLP:	LDAX	D		;GET DIGIT
+ F925 B7        	ORA	A		;END OF LINE?
+ F926 C8        	RZ			;Y: RET WITH CARRY CLEAR
+                
+ F927 FE20      	CPI	' '		;VALUE SEPARATOR?
+ F929 C8        	RZ			;Y: RET WITH CARRY CLEAR
+                
+ F92A FE41      	CPI	'A'		;CONVERT LETTERS TO UPPERCASE
+ F92C DA31F9    	JC	FHNUM
+ F92F E6DF      	ANI	('a'-'A') XOR 0FFH	
+                FHNUM:
+                
+ F931 29        	DAD	H		;MAKE ROOM FOR THE NEW DIGIT
+ F932 29        	DAD	H
+ F933 29        	DAD	H
+ F934 29        	DAD	H
+                
+ F935 CD6EFE    	CALL	HEXCON		;DO THE CONVERSION
+ F938 D2F4FF    	JNC	CMDERR		;NOT VALID HEXIDECIMAL VALUE?
+                
+ F93B 85        	ADD	L
+ F93C 6F        	MOV	L,A		;MOVE NEW DIGIT IN
+ F93D 13        	INX	D		;BUMP THE POINTER
+ F93E C324F9    	JMP	FHEXLP
+                
+                ;***COMMAND ROUTINE************************************
+                ; AD <SRC> <BCNT> [<GO>]
+                ; (DUMP MEMORY IN ALTAIR BINARY FORMAT)
+                ; ON ENTRY:
+                ;   HL=<SRC>
+                ;   CARRY SET IF NONE ENTERED
+                ;   DE POINTS TO <BCNT>
+                ;   TP COMMAND HAS SET UP THE TRANSFER PORT
+                ;******************************************************
+ F941 CDEFFF    ADCMD:	CALL	GETHEX		;SAVE <SRC>, GET <BCNT>
+ F944 CD1AF9    	CALL	PHFHEX		;SAVE <BCNT>, GET <GO>
+                
+ F947 D1        	POP	D		;GET DE=<BCNT>
+ F948 E3        	XTHL			;SAVE <GO>, GET <SRC>
+ F949 F5        	PUSH	PSW		;CARRY SET IF NO <GO> PROVIDED
+                
+ F94A EB        	XCHG			;DE= <SRC>, HL=<BCNT>
+                
+                ;DE = SOURCE ADDRESS
+                ;HL = BYTE COUNT
+                
+                ;PUNCH A PRE-LEADER SO THAT MITS'S MBL CAN LOAD THIS FILE
+                
+ F94B 3E20      	MVI	A,20H		;PUNCH 20H AS THE PRE-LEADER
+ F94D CD88F9    	CALL	LEADER
+                
+                ;PUNCH NULL LEADER
+                
+ F950 CD87F9    	CALL	LEADR0		;RETURNS WITH B=0
+                
+                ;LOOP TO PUNCH ALL THE REQUESTED DATA
+                ;(B=0 HERE, BOTH ON INITIAL ENTRY AND UPON LOOPING)
+                
+                ;COMPUTE B=DATA BYTE COUNT OF THE NEXT BLOCK, MAX=255
+                
+ F953 05        NXTBLK:	DCR	B		;B=FFH=255
+                
+ F954 7C        	MOV	A,H		;>256 BYTES LEFT?
+ F955 B7        	ORA	A
+ F956 C25AF9    	JNZ	BLKSIZ
+ F959 45        	MOV	B,L		;N: DO WHAT'S LEFT
+                BLKSIZ:
+                
+                ;PUNCH THE THE BLOCK HEADER INFO:
+                ; SYNC CHR, BYTE COUNT, & 2-BYTE LOAD ADDRESS
+                ;  B = BLOCK SIZE
+                ; DE = STARTING MEMORY ADDRESS FOR BLOCK DATA
+                ; HL = REMAINING BYTES TO PUNCH
+                
+ F95A D5        	PUSH	D		;SAVE LOAD ADDRESS
+                
+ F95B 1E3C      	MVI	E,ALTPLR	;PUNCH LOAD-BLOCK SYNC CHR
+ F95D 50        	MOV	D,B		;AND BLOCK BYTE COUNT	
+ F95E CD96FB    	CALL	TPOED
+                
+ F961 D1        	POP	D		;RESTORE LOAD ADDRESS
+ F962 CD96FB    	CALL	TPOED		;PUNCH DE=LOAD ADDRESS
+                				;ENDS WITH A=D
+ F965 83        	ADD	E		;A=CHECKSUM OF THE ADDRESS
+                
+                ;PUNCH B BYTES OF BLOCK DATA, COMPUTING CHECKSUM AS WE GO
+                ;  A = CHECKSUM SO FAR
+                ;  B = BLOCK SIZE
+                ; DE = STARTING MEMORY ADDRESS FOR BLOCK DATA
+                ; HL = REMAINING BYTES TO PUNCH
+                
+ F966 4F        BDATLP:	MOV	C,A		;TEMP SAVE CHECKSUM
+ F967 1A        	LDAX	D		;GET MEMORY DATA
+ F968 CD9BFB    	CALL	TPOUT		;...AND PUNCH IT
+ F96B 2B        	DCX	H		;ONE FEWER TO PUNCH
+                
+ F96C 81        	ADD	C		;UPDATE CHECKSUM
+                
+ F96D 13        	INX	D		;NEXT ADDRESS
+ F96E 05        	DCR	B		;LOOP 'TIL DONE WITH BLOCK DATA
+ F96F C266F9    	JNZ	BDATLP		;ENDS WITH B=0
+                
+                ;A = BLOCK CHECKSUM
+                ;B = 0
+                
+ F972 CD9BFB    	CALL	TPOUT		;PUNCH THE BLOCK CHECKSUM
+                
+                ;CONTINUE UNTIL ALL THE DATA HAS BEEN PUNCHED
+                ;  B = 0
+                ; DE = NEXT ADDRESS TO PUNCH
+                ; HL = REMAINING BYTES TO PUNCH
+                ; TEST FOR HL=0, MEANING THERE ARE MORE BYTES TO PUNCH
+                
+ F975 7D        	MOV	A,L
+ F976 B4        	ORA	H
+ F977 C253F9    	JNZ	NXTBLK		;Y: DO ANOTHER BLOCK
+                
+                ;PUNCH A GO RECORD, IF THE USER ASKED FOR ONE
+ F97A F1        	POP	PSW		;CARRY SET IF NO <GO> PROVIDED
+ F97B D1        	POP	D		;GO ADDRESS
+ F97C DA87F9    	JC	LEADR0		;NO GO RECORD?
+                
+ F97F 3E78      	MVI	A,ALTGOR	;GO RECORD SYNC CHR
+ F981 CD9BFB    	CALL	TPOUT		;PUNCH IT
+                
+ F984 CD96FB    	CALL	TPOED		;PUNCH DE=GO ADDRESS
+                
+                ;FALL INTO LEADR0 TO PUNCH A NULL TRAILER AND RETURN TO MAIN
+                
+                ;---LOCAL SUBROUTINE-------------
+                ; PUNCH A NULL LEADER
+                ; ON EXIT:
+                ;   A=0
+                ;   B=0
+                ;   ALL OTHER REGISTERS PRESERVED
+                ;--------------------------------
+ F987 AF        LEADR0:	XRA	A		;LEADER CHR
+                
+                ;FALL INTO LEADER (WITH A=0) TO PUNCH THE LEADER
+                
+                ;---LOCAL SUBROUTINE-------------
+                ; PUNCH A LEADER
+                ; ON ENTRY:
+                ;   A = LEADER CHARACTER
+                ; ON EXIT:
+                ;   B=0
+                ;   ALL OTHER REGISTERS PRESERVED
+                ;--------------------------------
+ F988 063C      LEADER:	MVI	B,ALTLDR	;LEADER LENGTH
+                
+ F98A CD9BFB    LEADLP:	CALL	TPOUT
+ F98D 05        	DCR	B
+ F98E C28AF9    	JNZ	LEADLP		;ENDS WITH B=0
+                
+ F991 C9        	RET
+                
+                ;***COMMAND ROUTINE*********************************
+                ; CO <SRC> <DST> <BCNT> [<RPT>] (COPY MEMORY)
+                ;
+                ; COPY <BCNT> BYTES OF MEMORY FROM <SRC> TO <DST>.
+                ; REPEAT <RPT> TIMES (FOR EPROM PROGRAMMING). VERIFY
+                ; RESULT WHEN DONE.
+                ; ON ENTRY:
+                ;  HL=<SRC>
+                ;  DE POINTS TO <DST>, <BCNT>, <RPT> FOLLOW
+                ;***************************************************
+ F992 CDEFFF    COCMD:	CALL	GETHEX		;SAVE SOURCE, GET DESTINATION
+ F995 CDEFFF    	CALL	GETHEX		;SAVE DEST, GET BYTE COUNT
+                
+ F998 CD4AFD    	CALL	CILPRT
+ F99B 436F707969	DB	'Copyin','g'+80H
+                
+ F9A2 CD1AF9    	CALL	PHFHEX		;SAVE <BCNT>, GET <RPT>
+ F9A5 7D        	MOV	A,L		;DEFAULT TO 1
+ F9A6 CE00      	ACI	0		;CARRY IF NO VALUE GIVEN
+                
+                ;REPEAT COPY THE SPECIFIED NUMBER OF TIMES (IN A)
+                
+ F9A8 C1        MCRLP:	POP	B		;BC=COUNT
+ F9A9 D1        	POP	D		;DE=DESTINATION
+ F9AA E1        	POP	H		;HL=SOURCE
+                
+ F9AB E5        	PUSH	H		;SAVE SOURCE
+ F9AC D5        	PUSH	D		;SAVE DEST
+ F9AD C5        	PUSH	B		;SAVE COUNT
+                
+ F9AE F5        	PUSH	PSW		;SAVE A=REPEAT COUNT
+                
+                ;LOOP TO COPY BC BYTES FROM (HL) TO (DE)
+                
+ F9AF 7E        MCLOOP:	MOV	A,M
+ F9B0 12        	STAX	D
+ F9B1 23        	INX	H
+ F9B2 13        	INX	D
+ F9B3 0B        	DCX	B
+ F9B4 78        	MOV	A,B
+ F9B5 B1        	ORA	C
+ F9B6 C2AFF9    	JNZ	MCLOOP
+                
+                ;REPEAT THE COPY AS REQUESTED BY THE USER
+                
+ F9B9 F1        	POP	PSW		;RECOVER REPEAT COUNT
+ F9BA 3D        	DCR	A		;REPEAT AS REQUESTED
+                
+                ;PRINT A PACIFIER DOT FOR ALL BUT THE LAST PASS
+                ;(THIS ELIMINATES THE DOT FOR A SINGLE-PASS COPY)
+ F9BB 47        	MOV	B,A		;TEMP SAVE REPEAT COUNT
+ F9BC 3E2E      	MVI	A,PCFIER
+ F9BE C48EF8    	CNZ	PRINTA		;PRESERVES ALL REGS
+ F9C1 78        	MOV	A,B		;REPEAT COUNT
+                
+ F9C2 C2A8F9    	JNZ	MCRLP
+                
+ F9C5 C3CFF9    	JMP	VERIFY		;GOOD COPY?
+                
+                ;***COMMAND ROUTINE*********************************
+                ; VE <SRC> <DST> <BCNT> (VERIFY MEMORY)
+                ;
+                ; COMPARE <BCNT> BYTES OF MEMORY FROM <SRC> TO <DST>
+                ; AND REPORT PASS/FAIL
+                ; ON ENTRY:
+                ;  HL=<SRC>
+                ;  CARRY SET IF NONE ENTERED
+                ;  DE POINTS TO <DST>, <BCNT> FOLLOWS
+                ;***************************************************
+ F9C8 CDEFFF    VECMD:	CALL	GETHEX		;SAVE <SRC>, GET <DST>
+ F9CB CDEFFF    	CALL	GETHEX		;SAVE <DST>, GET <BCNT>
+ F9CE E5        	PUSH	H		;SAVE <BCNT>
+                
+                ;FALL INTO VERIFY TO ACTUALLY VERIFY
+                
+                ;***SUBROUTINE****************************
+                ; VERIFY MEMORY. REPORT ERRORS TO CONSOLE.
+                ; ON ENTRY:
+                ;   TOP OF STACK=BYTE COUNT
+                ;   NEXT ON STACK = DESTINATION ADDRESS
+                ;   NEXT ON STACK - SOURCE ADDRESS
+                ;   NEXT ON STACK=RETURN ADDRESS (TO MAIN)
+                ;*****************************************
+ F9CF C1        VERIFY:	POP	B		;BYTE COUNT
+ F9D0 E1        	POP	H		;HL=DESTINATION
+ F9D1 D1        	POP	D		;DE=SOURCE
+                
+ F9D2 CD4AFD    	CALL	CILPRT
+ F9D5 436865636B	DB	'Checkin','g'+80H
+                
+                ;LOOP TO COMPARE MEMORY, REPORTING MISMATCHES
+                
+ F9DD 1A        VLOOP:	LDAX	D		;GET EXPECTED DATA
+ F9DE BE        	CMP	M		;MATCH?
+ F9DF C4A2FB    	CNZ	MERROR		;N: ERROR
+                
+ F9E2 23        	INX	H
+ F9E3 13        	INX	D
+ F9E4 0B        	DCX	B
+ F9E5 78        	MOV	A,B
+ F9E6 B1        	ORA	C
+ F9E7 C2DDF9    	JNZ	VLOOP
+                
+ F9EA C9        	RET
+                
+                ;***COMMAND ROUTINE*********************************
+                ; SE <ADR> <BYTE1> [<BYTE2> [<BYTEN>]]
+                ;    SEARCH FOR STRING OF BYTES, STARTING AT <ADR>
+                ;    <BYTEN> CAN BE EITHER HEX BYTE OR 'TEXT STRING'
+                ; ON ENTRY:
+                ;  HL=<ADR>
+                ;  CARRY SET IF NONE ENTERED
+                ;  DE POINTS TO <BYTES>
+                ;***************************************************
+                SECMD:
+                
+                ;GET SEARCH STRING FROM INPUT BUFFER, CONVERT EACH BYTE
+                ;TO BINARY, AND SAVE RESULT IN THE RAM BUFFER
+                
+ F9EB CDE5FF    	CALL	FNDBUF		;PUSH HL, FIND RAM BUFFER
+                
+ F9EE E5        	PUSH	H		;BINARY STRING ADDRESS
+ F9EF 012700    	LXI	B,QUOTE		;B=BYTE COUNT, C=QUOTE
+                	
+                ;------------------------------------------------
+                ;LOOP TO GET EITHER A 2-DIGIT HEX VALUE OR A TEXT
+                ;STRING (IN QUOTES) EACH PASS
+                ;------------------------------------------------
+ F9F2 CDEDFB    SCHLUP:	CALL	SSPACE		;RETURNS A=FOUND CHR, 0 IF NONE
+                
+ F9F5 B9        	CMP	C		;IS 1ST CHR A QUOTE?
+ F9F6 CC5AFA    	CZ	SSTRNG		;Y:SEARCH FOR A STRING
+ F9F9 C467FA    	CNZ	SCHHEX		;N: SEARCH FOR HEX
+                				;RETURNS CARRY SET IF END
+ F9FC D2F2F9    	JNC	SCHLUP		;LOOP TO GET ALL INPUT
+                
+                ;----------------------------------------	
+                ;SEARCH RAM FOR THE REQUESTED STRING
+                ; B = STRING LENGTH
+                ; TOP-OF-STACK = BINARY STRING ADDRESS
+                ; NEXT-ON-STACK = STARTING SEARCH ADDRESS
+                ;----------------------------------------
+ F9FF D1        	POP	D		;BINARY STRING ADDRESS
+ FA00 E1        	POP	H		;SEARCH START ADDRESS
+                
+ FA01 78        	MOV	A,B		;ANYTHING TO SEARCH FOR?
+ FA02 B7        	ORA	A
+ FA03 CAF4FF    	JZ	CMDERR		;ERROR IF NOT
+                
+ FA06 E5        SLOOP1:	PUSH	H		;SEARCH START ADDRESS
+ FA07 D5        	PUSH	D		;BINARY STRING ADDRESS
+                
+ FA08 48        	MOV	C,B		;STRING BYTE COUNT
+                
+                ;LOOP THROUGH ALL BYTES OF THE REQUESTED STRING
+                ;UNTIL EITHER ALL BYTES MATCH OR 1ST NON-MATCHING BYTE
+                
+ FA09 7A        SLOOP2:	MOV	A,D
+ FA0A BC        	CMP	H		;DON'T SEARCH OUR OWN RAM PAGE
+ FA0B CA45FA    	JZ	NOMTCH
+                
+ FA0E 1A        	LDAX	D		;SEARCH STRING
+ FA0F BE        	CMP	M		;CURRENT RAM
+ FA10 C245FA    	JNZ	NOMTCH
+                
+ FA13 23        	INX	H		;TEST NEXT BYTE
+ FA14 13        	INX	D
+ FA15 0D        	DCR	C		;TESTED ALL BYTES YET?
+ FA16 C209FA    	JNZ	SLOOP2
+                
+                ;STRING MATCH FOUND. PRINT ADDRESS, ASK TO CONTINUE SEARCH
+                
+ FA19 D1        	POP	D		;BINARY STRING ADDRESS
+ FA1A E1        	POP	H		;SEARCH START ADDRESS
+                
+ FA1B CD4AFD    	CALL	CILPRT
+ FA1E 466F756E64	DB	'Found',' '+80H
+ FA24 C5        	PUSH	B
+ FA25 CDF5FC    	CALL	PHLCHX		;PRINT MATCH ADDRESS, TRASH BC
+ FA28 C1        	POP	B
+                
+ FA29 CD4AFD    	CALL	CILPRT
+ FA2C 4D6F726520	DB	'More (Y/N)?',' '+80H
+                
+ FA38 CDD2FB    	CALL	GETKBD		;USER RESPONSE
+ FA3B CD8EF8    	CALL	PRINTA		;ECHO
+                
+ FA3E F620      	ORI	('y'-'Y')	;MAKE IT LOWERCASE
+ FA40 FE79      	CPI	'y'
+ FA42 C0        	RNZ			;ANYTHING BUT Y ENDS
+                
+ FA43 E5        	PUSH	H		;SEARCH START ADDRESS
+ FA44 D5        	PUSH	D		;BINARY STRING ADDRESS
+                
+                ;SEARCH AGAIN, STARTING AT THE NEXT BYTE AFTER HL.
+                ;QUIT IF WE'VE REACHED THE END OF MEMORY, FFFFH
+                
+ FA45 D1        NOMTCH:	POP	D		;BINARY STRING ADDRESS
+ FA46 E1        	POP	H		;SEARCH START ADDRESS
+                
+ FA47 23        	INX	H		;NEXT RAM
+ FA48 7C        	MOV	A,H
+ FA49 B5        	ORA	L		;END OF MEMORY?
+ FA4A C206FA    	JNZ	SLOOP1
+                
+ FA4D CD4AFD    	CALL	CILPRT
+ FA50 4E6F742066	DB	'Not foun','d'+80H
+                
+ FA59 C9        	RET
+                
+                ;---LOCAL SUBROUTINE------------------------
+                ; GET A TEXT STRING FROM USER INPUT AT (DE),
+                ; STORE STRING AT (HL), BUMP COUNT IN B
+                ; ON ENTRY:
+                ;   B = BYTE COUNT
+                ;   C=QUOTE
+                ;   DE POINTS TO INITIAL QUOTE
+                ; ON EXIT:
+                ;   Z FLAG SET
+                ;-------------------------------------------
+ FA5A 13        SSTRNG:	INX	D		;SKIP OVER QUOTE
+                
+ FA5B 1A        STLOOP:	LDAX	D
+ FA5C B7        	ORA	A		;END QUOTE IS NOT REQUIRED
+ FA5D C8        	RZ	
+                
+ FA5E 13        	INX	D		;POINT PAST THIS INPUT CHR
+                
+ FA5F B9        	CMP	C		;END OF STRING?
+ FA60 C8        	RZ	
+                
+ FA61 77        	MOV	M,A		;STORE A STRING BYTE
+ FA62 23        	INX	H
+ FA63 04        	INR	B
+                
+ FA64 C35BFA    	JMP	STLOOP		;GET MORE OF THIS STRING
+                
+                ;---LOCAL SUBROUTINE--------------------------------
+                ; GET ONE HEX VALUE FROM USER INPUT AT (DE), CONVERT
+                ; IT TO BINARY, STORE IT AT (HL), BUMP COUNT IN B
+                ; ON EXIT:
+                ;    CARRY SET IF NO HEX DIGIT FOUND
+                ;---------------------------------------------------
+ FA67 CD1AF9    SCHHEX:	CALL	PHFHEX		;SAVE NEXT STRING ADDR BYTE,
+                				;GET A VALUE.
+                				;HL=0 & CARRY SET IF NONE
+                
+ FA6A 24        	INR	H		;NO HIGH BYTE ALLOWED
+ FA6B 25        	DCR	H		;DOES NOT CHANGE CARRY
+ FA6C C2F4FF    	JNZ	CMDERR
+                
+ FA6F 7D        	MOV	A,L		;BINARY VALUE
+ FA70 E1        	POP	H		;NEXT STRING ADDRESS BYTE
+                
+ FA71 D8        	RC			;CARRY SET MEANS END OF INPUT
+                
+ FA72 77        	MOV	M,A		;STORE THE HEX DIGIT
+ FA73 23        	INX	H
+ FA74 04        	INR	B
+                
+ FA75 C9        	RET
+                
+                ;***COMMAND ROUTINE*****************************
+                ; TT [0/1] SET TERMINAL TYPE
+                ;   0 (EVEN) MEANS BACKSPACING WORKS
+                ;   1 (ODD) MEANS NO BACKSPACING (E.G. TELETYPE)
+                ; ON ENTRY:
+                ;   L = 0 OR 1 (ODD OR EVEN REALLY)
+                ;***********************************************
+ FA76 4D        TTCMD:	MOV	C,L		;USER VALUE
+                
+ FA77 3E68      	MVI	A,TTYPE-RIOCOD+RAMCOD
+ FA79 CDE9FF    	CALL	RAMPAG
+                
+ FA7C 71        	MOV	M,C		;REMEMBER TERMINAL TYPE
+ FA7D C9        	RET
+                
+                ;***COMMAND ROUTINE*********************
+                ; EX [<ADR> [<OPT>]] (EXECUTE)
+                ;
+                ; JUMP TO <ADR>. IF <OPT>=1 THE EXECUTE
+                ; AN "IN FF" FIRST, TO DISABLE THIS PROM
+                ; ON ENTRY:
+                ;  HL = ADDRESS, DEFAULT TO 0
+                ;  DE POINTS TO <OPT>
+                ;  CARRY SET IF NONE ENTERED
+                ;  TOP-OF-STACK HAS MAIN ADDRESS
+                ;***************************************
+ FA7E CD1AF9    EXCMD:	CALL	PHFHEX		;SAVE <ADR>, GET L=<OPT>
+ FA81 2D        	DCR	L		;ANYTHING BUT 1
+ FA82 C0        	RNZ			;..JUST EXECUTES AT <ADR>
+                
+                ; FALL INTO EXECDP
+                
+                ;***EXIT******************************
+                ;EXECUTE "IN FF" AND THEN JUMP TO CODE
+                ;(THIS DISABLES PROM)
+                ; ON ENTRY:
+                ;   EXECUTION ADDRESS IS ON STACK
+                ;*************************************
+ FA83 1EC9      EXECDP:	MVI	E,RET		;RET OPCODE, <DON'T CARE>
+ FA85 D5        	PUSH	D		;..ONTO STACK
+                	
+ FA86 11DBFF    	LXI	D,0FFDBH	;IN FF OPCODE
+ FA89 D5        	PUSH	D		;..ONTO STACK
+                
+ FA8A 210000    	LXI	H,0
+ FA8D 39        	DAD	SP		;POINT HL TO OUR CODE
+                
+ FA8E D1        	POP	D		;POINT SP TO <ADR>
+ FA8F D1        	POP	D
+ FA90 E9        	PCHL			;EXECUTE: IN  FF
+                				;         RET
+                
+                ;***COMMAND ROUTINE***********************************
+                ; DU [<ADR>] [<BCNT>] (DUMP MEMORY TO CONSOLE)
+                ;
+                ; PRINT <BCNT> BYTES OF MEMORY CONTENTS FROM <ADR> ON
+                ; THE CONSOLE IN HEX. IF NO COUNT IS SPECIFIED, THEN
+                ; THEN PRINT THE CONTENTS OF ALL MEMORY, 10000H BYTES.
+                ; PAUSE WITH THE SPACE BAR, ABORT WITH CONTROL-C.
+                ; ON ENTRY:
+                ;    HL=<ADR>
+                ;    DE POINTS TO <BCNT>, IF ANY
+                ;*****************************************************
+ FA91 CD1AF9    DUCMD:	CALL	PHFHEX		;SAVE <ADR>, GET HL=<BCNT>
+ FA94 7D        	MOV	A,L		;LOW BYTE
+ FA95 CE00      	ACI	0		;DEFAULT TO 1
+ FA97 6F        	MOV	L,A
+                
+ FA98 EB        	XCHG			;DE HAS BYTE COUNT
+ FA99 E1        	POP	H		;RECOVER START ADDRESS
+                
+                ;PRINT THE ADDRESS AT THE BEGINNING OF EACH LINE
+                
+ FA9A CD5FFE    DLINE:	CALL	PHLADR		;PRINT HL AS AN ADDRESS
+                				;SETS B=0, TRASHES C
+                
+                ;PRINT 16 BYTES OF HEX DATA SEPARATED BY SPACES
+                
+ FA9D E5        	PUSH	H		;SAVE FOR ASCII DUMP
+ FA9E D5        	PUSH	D
+                
+ FA9F 7E        DLOOP:	MOV	A,M		;GET THE CHARACTER
+ FAA0 CD43FE    	CALL	PAHEX		;TO CONSOLE IN HEX (B=0)
+                
+ FAA3 CD4FFD    	CALL	ILPRNT		;PRINT A SPACE
+ FAA6 A0        	DB	' '+80H
+                
+ FAA7 23        	INX	H		;NEXT ADDRESS
+                
+ FAA8 1B        	DCX	D		;ALL DONE?
+ FAA9 7A        	MOV	A,D
+ FAAA B3        	ORA	E
+ FAAB CAB4FA    	JZ	DLDONE		;Y: DONE WITH COMMAND
+                
+ FAAE 3E0F      	MVI	A,0FH		;NEW LINE EVERY XXX0 HEX
+ FAB0 A5        	ANA	L
+                
+ FAB1 C29FFA    	JNZ	DLOOP		;NOT ZERO IF MORE FOR THIS LINE
+                
+ FAB4 D1        DLDONE:	POP	D		;RECOVER COUNT AND ADDRESS
+ FAB5 E1        	POP	H
+                
+                ;PRINT UP TO 16 ASCII CHARACTERS, OR '.' IF UNPRINTABLE
+                
+ FAB6 CD4FFD    	CALL	ILPRNT		;PRETTY SPACE
+ FAB9 A0        	DB	' '+80H
+                
+ FABA 7E        ADLOOP:	MOV	A,M		;GET THE CHARACTER
+ FABB 3C        	INR	A		;DEL (7F) IS ALSO NONPRINTING
+ FABC E67F      	ANI	7FH		;CLEAR PARITY
+ FABE FE21      	CPI	' '+1		;EVERYTHING BELOW SPACE
+ FAC0 D2C5FA    	JNC	PRNTBL		;..IS NONPRINTING
+                
+ FAC3 3E2F      	MVI	A,'.'+1		;DOT FOR NON-PRINTING
+                
+ FAC5 3D        PRNTBL:	DCR	A		;UNDO INC
+                
+ FAC6 CD8EF8    	CALL	PRINTA		;PRINT ASCII OR DOT
+                
+ FAC9 1B        	DCX	D		;ALL DONE?
+ FACA 7A        	MOV	A,D
+ FACB B3        	ORA	E
+ FACC C8        	RZ			;DONE WITH COMMAND
+                
+ FACD 23        	INX	H		;NEXT LINE?
+ FACE 3E0F      	MVI	A,0FH		;NEW LINE EVERY XXX0 HEX
+ FAD0 A5        	ANA	L
+                
+ FAD1 C2BAFA    	JNZ	ADLOOP		;NOT ZERO IF MORE FOR THIS LINE
+                
+                ;GIVE THE USER A CHANCE TO PAUSE OR QUIT AT THE END OF EACH LINE
+                
+ FAD4 CDCCFB    	CALL	CKPAUS		;PAUSE OR ABORT?
+ FAD7 C39AFA    	JMP	DLINE		;NEXT LINE
+                
+                ;***COMMAND ROUTINE***********************************
+                ; FI [<VAL> [<ADR> [<BCNT>]]] (FILL MEMORY)
+                ;
+                ; FILL <BCNT> BYTES OF MEMORY WITH <VAL> FROM <ADR>.
+                ; IF <VAL> IS NOT PROVIDED, THEN FILL THE SPECIFIED
+                ; RANGE WITH 00. <ADR> DEFAULTS TO 0. IF <BCNT> IS NOT
+                ; PROVIDED, FILL UNTIL WE REACH AMON'S RAM PAGE.
+                ; ON ENTRY:
+                ;  HL=<ADR>
+                ;  CARRY SET IF NONE ENTERED
+                ;  DE POINTS TO <BCNT>, <VAL> FOLLOWS, IF ANY
+                ;*****************************************************
+ FADA 4D        FICMD:	MOV	C,L		;<VAL> C
+                
+ FADB CD1CF9    	CALL	FNDHEX		;GET <ADR>, DEFAULT 0
+ FADE CD1AF9    	CALL	PHFHEX		;SAVE <ADR>, GET HL=<BCNT>
+ FAE1 EB        	XCHG			;DE HAS BYTE COUNT
+                
+ FAE2 CDE9FF    	CALL	RAMPAG		;FIND OUR RAM
+ FAE5 44        	MOV	B,H		;B REMEMBERS RAM PAGE
+                
+ FAE6 E1        	POP	H		;HL HAS START ADDRESS
+                
+                ;LOOP TO FILL MEMORY, QUITTING IF RAM PAGE
+                
+ FAE7 7C        FMLOOP:	MOV	A,H
+ FAE8 B8        	CMP	B		;FILLING RAM PAGE?
+ FAE9 C8        	RZ			;Y: DONE	
+                
+ FAEA 71        	MOV	M,C
+ FAEB 23        	INX	H
+                
+ FAEC 1B        	DCX	D		;DONE YET?
+ FAED 7A        	MOV	A,D
+ FAEE B3        	ORA	E
+ FAEF C2E7FA    	JNZ	FMLOOP
+                
+ FAF2 C9        	RET
+                
+                ;***COMMAND ROUTINE***********************************
+                ; TE [<EXCHR>] (SIMPLE TERMINAL MODE)
+                ;
+                ; SEND ALL CONSOLE KEYBOARD DATA TO TRANSFER PORT,
+                ; AND SEND SEND ALL TRANSFER PORT DATA TO THE CONSOLE.
+                ; IF THE TRANSFER PORT IS THE CONSOLE, THEN JUST ECHO
+                ; THE KEYBOARD TO THE CONSOLE. NULLS FROM THE KEYBOARD
+                ; ARE IGNORED.
+                ; <EXCHR> ON THE KEYBOARD TO EXIT
+                ;  (DEFAULTS TO DTEXIT)
+                ;*****************************************************
+ FAF3 CD4FFD    TECMD:	CALL	ILPRNT		;ANNOUNCE EXIT CHARACTER
+ FAF6 457869743A	DB	'Exit: ','^'+80H
+                
+ FAFD CDEDFB    	CALL	SSPACE		;GET OPTIONAL EXIT CHARACTER
+ FB00 C205FB    	JNZ	TMNL1		;GOT AN EXIT VALUE IN A
+ FB03 3E03      	MVI	A,DTEXIT	;DEFAULT ABORT
+                
+                ;CONVERT EXIT CHARACTER TO UPPERCASE, NON-CONTROL, AND
+                ;PRINT EXIT CHARACTER MESSAGE
+                
+ FB05 E61F      TMNL1:	ANI	1FH		;MAKE IT A CONTROL CHR
+ FB07 6F        	MOV	L,A		;REMEMBER EXIT CHARACTER
+                
+ FB08 F640      	ORI	'C'-CTRLC	;MAKE IT PRINTABLE
+ FB0A CD8EF8    	CALL	PRINTA
+                
+ FB0D CD4AFD    	CALL	CILPRT		;CR,LF,LF TO BE PRETTY
+ FB10 8A        	DB	LF+80H
+                
+                ;BE A TERMINAL UNTIL WE GET AN EXIT CHARACTER=L.
+                ;JUST ECHO IF TRANSFER PORT = CONSOLE
+                
+ FB11 CD7FF8    TLOOP:	CALL	KSTAT		;ANYTHING TYPED?
+ FB14 C45DFD    	CNZ	KDATA		;Y:GET THE KEYBOARD DATA
+                
+ FB17 BD        	CMP	L		;EXIT CHARACTER?
+ FB18 C8        	RZ			;Y: DONE
+                
+ FB19 B7        	ORA	A		;ANYTHING TYPED? (IGNORE NULLS)
+ FB1A C49BFB    	CNZ	TPOUT		;KBD DATA TO TRANSFER PORT
+                
+ FB1D CD7FFD    	CALL	TESTTP		;TRANSFER PORT = CONSOLE?
+                				;Z SET IF SO
+                
+ FB20 C474FD    	CNZ	TPISTA		;ANY TRANSFER PORT DATA?
+                				;NZ IF SO
+                
+ FB23 C478FD    	CNZ	TPIN		;GET TRANSFER PORT DATA
+                				;ALWAYS RETURNS W/ NZ
+ FB26 C48EF8    	CNZ	PRINTA		;AND SEND IT TO CONSOLE
+ FB29 C311FB    	JMP	TLOOP
+                
+                ;***COMMAND ROUTINE**********************************
+                ; OT <PORT> <DATA> (OUTPUT TO PORT)
+                ;
+                ; ON ENTRY:
+                ;    L=PORT
+                ;    DE POINTS TO DATA
+                ;
+                ; CREATES THIS ROUTINE ON THE STACK, THEN EXECUTES IT
+                ;	NOP
+                ;	MVI  A,<DATA>       
+                ;       OUT  <PORT>
+                ;       RET
+                ;****************************************************
+ FB2C 26C9      OTCMD:	MVI	H,RET		;OPCODE
+ FB2E CD1AF9    	CALL	PHFHEX		;PUSH <PORT>, RET OPCODE
+                				;GET L=<DATA>
+                
+ FB31 26D3      	MVI	H,OUT		;OPCODE
+ FB33 E5        	PUSH	H		;DATA, OUT OPCODE
+                
+ FB34 21003E    	LXI	H,3E00H		;NOP, MVI A, OPCODES
+ FB37 E5        	PUSH	H
+                
+ FB38 65        	MOV	H,L		;HL=0
+ FB39 39        	DAD	SP		;HL POINTS TO ROUTINE
+                
+ FB3A D1        	POP	D		;FIX STACK
+ FB3B D1        	POP	D
+ FB3C D1        	POP	D
+ FB3D E9        	PCHL			;EXECUTE RAM ROUTINE
+                
+                ;***COMMAND ROUTINE*****************************************
+                ; HD <ADR> <BCNT> [<OFST>] (INTEL HEX DUMP TO TRANSFER PORT)
+                ;
+                ; DUMP THE SPECIFIED MEMORY RANGE TO THE TRANSFER
+                ; PORT AS AN INTEL HEX FILE
+                ; ON ENTRY:
+                ;    HL=ADR
+                ;    DE POINTS TO SUBSEQUENT PARAMETERS
+                ;***********************************************************
+ FB3E CDEFFF    HDCMD:	CALL	GETHEX		;SAVE <ADR>, GET HL=<BCNT>	
+ FB41 CD1AF9    	CALL	PHFHEX		;SAVE <BCNT>, GET HL=<OFST>
+                
+ FB44 E3        	XTHL			;HL=BYTE COUNT
+ FB45 C1        	POP	B		;BC=OFFSET
+ FB46 D1        	POP	D		;DE= START ADDRESS
+ FB47 C5        	PUSH	B		;ADDRESS OFFSET ONTO STACK
+                
+                ;LOOP TO SEND REQUESTED DATA IN HRLEN-BYTE RECORDS
+                
+                ;SEND RECORD-START
+                
+ FB48 D5        HDLINE:	PUSH	D		;PRINT CRLF
+ FB49 CD93FB    	CALL	TPCRLF
+ FB4C D1        	POP	D
+                
+ FB4D 3E3A      	MVI	A,':'
+ FB4F CD9BFB    	CALL	TPOUT
+                
+                ;COMPUTE THIS RECORD BYTE COUNT
+                	
+ FB52 0610      	MVI	B,HRLEN		;DEFAULT BYTES/LINE
+                
+ FB54 7D        	MOV	A,L		;SHORT LAST LINE?
+ FB55 90        	SUB	B		;NORMAL BYTES/LINE
+ FB56 7C        	MOV	A,H
+ FB57 DE00      	SBI	0
+ FB59 D25DFB    	JNC	HDLIN1		;N: FULL LINE
+                
+ FB5C 45        	MOV	B,L		;Y:SHORT LINE
+                HDLIN1:
+                
+                ;IF BYTE COUNT IS 0 THEN GO FINISH EOF RECORD
+                
+ FB5D 78        	MOV	A,B
+ FB5E B7        	ORA	A
+ FB5F CA88FB    	JZ	HDEOF
+                
+                ;SEND RECORD BYTE COUNT=A TO TRANSFER PORT (B<>0)
+                
+ FB62 CD3FFE    	CALL	PAHEXC		;SEND BYTE COUNT
+                
+ FB65 48        	MOV	C,B		;INITIATE CHECKSUM		
+                
+                ;COMPUTE THE ADDRESS BY ADDING THE RAM ADDRESS TO THE
+                ;ADDRESS OFFSET. SEND THE ADDRESS AT THE BEGINNING OF
+                ;EACH ADDRESS, COMPUTING CHECKSUM IN C (B<>0)
+                
+ FB66 E3        	XTHL			;HL=ADDRESS OFFSET
+                				;REMAINING BYTE COUNT ON STACK
+ FB67 E5        	PUSH	H		;SAVE ADDRESS OFFSET
+                
+ FB68 19        	DAD	D		;COMPUTE ADDRESS WITH OFFSET
+ FB69 CD37FE    	CALL	PHLHEX		;SEND ADDRESS WITH OFFSET
+                
+ FB6C E1        	POP	H		;RECOVER ADDRESS OFFSET
+ FB6D E3        	XTHL			;OFFSET ON STACK,
+                				;REMAINING BYTE COUNT TO HL
+                
+                ;SEND THE RECORD TYPE (00)
+                
+ FB6E AF        	XRA	A
+ FB6F CD3FFE    	CALL	PAHEXC
+                
+                ;SEND B BYTES OF HEX DATA ON EACH LINE, COMPUTING
+                ;THE CHECKSUM IN C. B>0 HERE.
+                
+ FB72 1A        HDLOOP:	LDAX	D		;GET THE CHARACTER
+ FB73 CD3FFE    	CALL	PAHEXC		;SEND TO TRANSFER PORT
+                				;(B<>0)
+ FB76 2B        	DCX	H
+ FB77 13        	INX	D
+ FB78 05        	DCR	B		;NEXT
+ FB79 C272FB    	JNZ	HDLOOP
+                
+                ;SEND THE CHECKSUM (WITH B<>0)
+                
+ FB7C AF        	XRA	A
+ FB7D 91        	SUB	C
+ FB7E 04        	INR	B		;B<>0 MEANS TRANSFER PORT
+ FB7F CD3FFE    	CALL	PAHEXC
+                
+                ;GIVE THE USER A CHANCE TO BREAK IN AT THE END OF EACH LINE
+                
+ FB82 CD66FD    	CALL	CHKKBD		;ABORT IF USER SAYS SO
+                
+                ;NEXT RECORD
+                
+ FB85 C348FB    	JMP	HDLINE		;NEXT RECORD
+                
+                ;--------------------------------------------
+                ;FINISH END-OF-FILE INTEL HEX RECORD
+                ;ON ENTRY:
+                ;  THE CR LF AND COLON HAVE ALREADY BEEN SENT
+                ;  THE ADDRESS OFFSET IS STILL ON THE STACK
+                ;--------------------------------------------
+ FB88 C1        HDEOF:	POP	B		;CHUCK ADDRESS OFFSET
+ FB89 0605      	MVI	B,5		;5 BYTES FOR EOF
+                
+ FB8B AF        HDELP:	XRA	A
+ FB8C CD43FE    	CALL	PAHEX		;B<>0 FOR TRANSFER PORT
+ FB8F 05        	DCR	B
+ FB90 C28BFB    	JNZ	HDELP
+                
+                ;FALL INTO TPCRLF
+                
+                ;===============
+                ;= SUBROUTINES =
+                ;===============
+                
+                ;***SUBROUTINE******************
+                ; SEND CRLF TO THE TRANSFER PORT
+                ; TRASHES DE
+                ;*******************************
+ FB93 110D0A    TPCRLF:	LXI	D,LF*256+CR
+                
+                ;FALL INTO TPOED
+                
+                ;***SUBROUTINE**********************
+                ; SEND E THEN D TO THE TRANSFER PORT
+                ; ON EXIT:
+                ;   A=D
+                ;***********************************
+ FB96 7B        TPOED:	MOV	A,E
+ FB97 CD9BFB    	CALL	TPOUT
+ FB9A 7A        	MOV	A,D
+                
+                ;FALL INTO TPOUT
+                
+                ;***SUBROUTINE**********************
+                ; SEND A TO THE TRANSFER PORT
+                ; ON ENTRY:
+                ;   A = DATA TO SEND
+                ;   SP POINTS INTO THE RAM PAGE
+                ;   TRANSFER PORT IS ALREADY SET UP
+                ; ALL REGISTERS PRESERVED
+                ;***********************************
+ FB9B CDE7FF    TPOUT:	CALL	HRMPAG			;DON'T MESS UP A
+ FB9E 2E3B      	MVI	L,RTPOUT-RIOCOD+RAMCOD	;HL POINTS TO RTPOUT
+                
+ FBA0 E3        	XTHL				;RESTORE HL, PUT
+                					;..ADDRESS ON STACK
+ FBA1 C9        	RET				;GO TO RTPOUT WITH A
+                
+                ;***SUBROUTINE************************
+                ; PRINT MEMORY ERROR DETAILS, AND GIVE
+                ; USER A CHANCE TO PAUSE OR ABORT
+                ; ON ENTRY:
+                ;   A=EXPECTED (SOURCE) DATA
+                ;  HL=DESTINATION ADDRESS
+                ;(HL)=FOUND DATA
+                ; TRASHES PSW
+                ;*************************************
+ FBA2 C5        MERROR:	PUSH	B
+ FBA3 F5        	PUSH	PSW		;SAVE SOURCE DATA
+                
+ FBA4 CD4AFD    	CALL	CILPRT
+ FBA7 3FBA      	DB	'?',':'+80H
+ FBA9 CDF5FC    	CALL	PHLCHX		;PRINT ADDRESS IN HL ON CONSOLE,
+                				;..TRASH C, SET B=0
+                
+ FBAC CD4FFD    	CALL	ILPRNT
+ FBAF 2045787065	DB	' Expected',' '+80H
+                
+ FBB9 F1        	POP	PSW		;RECOVER SOURCE DATA
+ FBBA CD43FE    	CALL	PAHEX
+                
+ FBBD CD4FFD    	CALL	ILPRNT
+ FBC0 2C20726561	DB	', read',' '+80H
+ FBC7 7E        	MOV	A,M		;GET DESTINATION DATA
+ FBC8 CD43FE    	CALL	PAHEX
+                
+ FBCB C1        	POP	B
+                
+                ;FALL INTO CKPAUS
+                
+                ;***SUBROUTINE********************************
+                ; GET A KEYBOARD CHARACTER, ABORT IF CONTROL-C
+                ; PAUSE (UNTIL ANYTHING ELSE TYPED) IF SPACE
+                ; ON EXIT:
+                ;    A=KEYBOARD CHARACTER, Z CLEARED
+                ;*********************************************
+ FBCC CD66FD    CKPAUS:	CALL	CHKKBD		;ABORT OR PAUSE?
+                
+ FBCF FE20      	CPI	PAUKEY		;PAUSE?
+ FBD1 C0        	RNZ
+                
+                ;FALL INTO GETKBD AND WAIT FOR ANY KEY TO END PAUSE
+                
+                ;***SUBROUTINE********************************
+                ; GET A KEYBOARD CHARACTER, ABORT IF CONTROL-C
+                ; ON EXIT:
+                ;    A=KEYBOARD CHARACTER, Z CLEARED
+                ;*********************************************
+ FBD2 CD66FD    GETKBD:	CALL	CHKKBD		;GET KBD CHARACTER, TEST FOR ^C
+ FBD5 CAD2FB    	JZ	GETKBD		;WAIT FOR CHARACTER
+                
+ FBD8 C9        	RET
+                
+                ;***SUBROUTINE**********************************************
+                ; READ A COMMAND LINE FROM THE KEYBOARD, ECHOING AND SAVING
+                ; IT IN THE INPUT LINE BUFFER
+                ;
+                ; CR INPUT ENDS THE SEQUENCE. THE CR IS NOT SAVED IN THE
+                ; INPUT LINE BUFFER. INSTEAD, THE LINE IS TERMINATED WITH 0.
+                ;
+                ; ON EXIT:
+                ;   COMPLETE COMMAND LINE IS IN THE INPUT LINE BUFFER
+                ;   DE=ADDRESS OF THE FIRST NON-BLANK CHARACTER ON THE LINE
+                ;   A = FIRST NON-BLANK VALUE FOUND
+                ;   Z SET IF NOTHING BUT SPACES FOUND
+                ;***********************************************************
+ FBD9 CDE5FF    GETLIN:	CALL	FNDBUF		;FIND BUFFER, PUSH HL
+                
+ FBDC E5        	PUSH	H		;SAVE INPUT LINE BUFFER'S
+                				;..START ADDRESS
+                
+                ;GET & ECHO CHARACTERS, STASHING THEM IN THE INPUT LINE BUFFER
+                ;AT HL, UNTIL A CR IS ENCOUNTERED
+                
+ FBDD CD11FD    GLLOOP:	CALL	LBCHR		;GET KBD CHR INTO LINE BUFFER
+                				;WITH ECHO
+                
+ FBE0 D60D      	SUI	CR		;END OF LINE FROM USER?
+ FBE2 C2DDFB    	JNZ	GLLOOP		;N: GET ANOTHER CHR
+                
+ FBE5 2B        	DCX	H		;BACK UP TO CR
+ FBE6 77        	MOV	M,A		; OVERWRITE CR WITH NULL
+                
+ FBE7 CD4FFD    	CALL	ILPRNT		;LINEFEED TO FOLLOW CR
+ FBEA 8A        	DB	LF+80H
+                
+ FBEB D1        	POP	D		;INPUT LINE BUFFER ADDRESS
+ FBEC E1        	POP	H		;RESTORE ORIGINAL HL
+                
+                ;FALL INTO SSPACE TO SKIP INITIAL SPACES
+                
+                ;***SUBROUTINE*****************************
+                ; SCAN PAST SPACES, LOOKING FOR THE FIRST
+                ; NON-SPACE CHARACTER
+                ;
+                ; ON ENTRY:
+                ;   DE=ADDRESS WITHIN THE INPUT LINE BUFFER
+                ; ON EXIT:
+                ;   A=0 AND Z SET IF NONE FOUND
+                ;   A=CHARACTER VALUE AND Z CLEAR IF FOUND
+                ;******************************************
+ FBED 1A        SSPACE:	LDAX	D		;GET NEXT CHARACTER
+ FBEE B7        	ORA	A		;TERMINATING NULL?
+ FBEF C8        	RZ
+                
+ FBF0 FE20      	CPI	' '		;ANOTHER SPACE?
+ FBF2 C0        	RNZ			;WE'RE PAST THEM
+                
+ FBF3 13        	INX	D		;NEXT SCAN ADDRESS
+ FBF4 C3EDFB    	JMP	SSPACE		;KEEP SKIPPING
+                
+                ;===ASSEMBLY CHECK================================
+                ; THE ABOVE CODE MUST NOT OVERRUN THE NEXT SECTION
+                ;=================================================
+ FBF7 =         H0END	EQU	$
+                
+                 IF (HDBADR - H0END)/256
+                	ERROR: HDBL IS OVERWRITING PRIOR CODE
+                 ENDIF
+                
+                ;==============================================================
+                ; HARD DISK BOOT LOADER SUBSYSTEM (HDBL)
+                ;
+                ; THE STANDARD 88-HDSK SYSTEM USES A PERTEC D3422 DISK DRIVE,
+                ; WHICH CONTAINS 2 PLATTERS - ONE IS IN A REMOVABLE CARTRIDGE,
+                ; THE OTHER IS A FIXED PLATTER. (HOWEVER, THE 88-HDSK
+                ; CONTROLLER CAN ACTUALLY SUPPORT UP TO 4 PLATTERS, SUPPORTING
+                ; THE PERTEC D3462 DISK DRIVE, WHICH HAS ONE REMOVABLE
+                ; PLATTER, AND 3 FIXED PLATTERS.)
+                ;
+                ; THERE ARE 24 256-BYTE SECTORS PER TRACK, AND THESE ARE
+                ; NUMBERED 0 THROUGH 23 ON EACH TRACK. EACH PLATTER HAS 2
+                ; SIDES, NUMBERED 0 AND 1. DATA ON EACH PLATTER IS ORGANIZED AS
+                ; A SEQUENCE OF DISK PAGES, WHERE EACH PAGE IS ONE SECTOR.
+                ; PAGES ARE NUMBERED SEQUENTIALLY STARTING AT 0 (ON TRACK 0,
+                ; SIDE 0), THROUGH THE 24 SECTORS ON TRACK 0, SIDE 0, AND THEN
+                ; ON TO TRACK 0, SIDE 1, WHERE SECTOR 0 IS PAGE 24.  PAGE 47 IS
+                ; THE FIRST SECTOR ON TRACK 1, SIDE 0, AND PAGE NUMBERING
+                ; CONTINUES THIS WAY THROUGH ALL THE TRACKS.
+                ;
+                ; PAGE 0 (WHICH IS TRACK 0, SIDE 0, SECTOR 0) IS THE PACK
+                ; DESCRIPTOR PAGE, CONTAINING VARIOUS INFORMATION ABOUT THE
+                ; PARTICULAR DISK PLATTER. BYTES 40-43 OF THIS PAGE ARE THE
+                ; "OPSYS POINTERS." BYTES 40 & 41 ARE THE PAGE NUMBER OF THE
+                ; STARTING BOOT PAGE, BYTES 42 & 43 ARE THE NUMBER OF PAGES TO
+                ; LOAD DURING BOOT. HDBL ASSUMES THAT THE BOOT FILE IS TO BE
+                ; LOADED INTO MEMORY STARTING AT ADDRESS 0000, AND EXECUTED
+                ; THERE.
+                ;==============================================================
+ FC00           	ORG	HDBADR
+                
+                ;==============================================================
+                ; ENTRY HERE TO EXECUTE HDBL DIRECTLY, TO BOOT FROM A HARD
+                ; DISK. THIS IS THE SAME ADDRESS WHERE MY HDBL PROM STARTS.
+                ;==============================================================
+ FC00 0106FC    HDBL:	LXI	B,HDBRET	;RETURN ADDRESS
+ FC03 C303F8    	JMP	INIT		;GO FIND A REAL STACK
+                				;AND INITIALIZE ACIAS
+                				;RETURNS WITH E=0
+                
+ FC06 6B        HDBRET:	MOV	L,E		;BOOT FROM PLATTER 0
+                
+                ;FALL INTO HBCMD
+                
+                ;***COMMAND ROUTINE******
+                ; HB  BOOT FROM HARD DISK
+                ; ON ENTRY:
+                ;   L<0> = PLATTER
+                ;************************
+ FC07 7D        HBCMD:	MOV	A,L
+ FC08 E601      	ANI	1		;JUST THE LSB
+ FC0A 0F        	RRC			;PLATTER GOES IN BITS <7:6>
+ FC0B 0F        	RRC			;..WHICH IS CFPLTR
+ FC0C 47        	MOV	B,A		;B<7:6>=PLATTER BITS
+                
+                ;-------------------------------------- 
+                ;INITIALIZE 88-HDSK INTERFACE BOARD
+                ;(ACTUALLY PORTS 0 AND 1 OF AN 88-4PIO)
+                ;ON EXIT:
+                ;  B = PLATTER IN BITS <7:6>
+                ; DE = 0
+                ;--------------------------------------
+ FC0D AF        	XRA	A
+ FC0E 57        	MOV	D,A		;SET LOAD INITIAL PAGE
+ FC0F 5F        	MOV	E,A
+                	
+ FC10 D3A0      	OUT	0A0H		;SELECT PORT 0AH DDR 
+ FC12 D3A2      	OUT	0A2H		;SELECT PORT 0BH DDR
+ FC14 D3A4      	OUT	0A4H		;SELECT PORT 1AH DDR
+ FC16 D3A6      	OUT	0A6H		;SELECT PORT 1BH DDR
+ FC18 D3A1      	OUT	0A1H		;PORT 0AH IS AN INPUT PORT
+ FC1A D3A5      	OUT	0A5H		;PORT 1AH IS AN INPUT PORT
+                
+ FC1C 2F        	CMA
+ FC1D D3A3      	OUT	0A3H		;PORT 0BH IS AN OUTPUT PORT
+ FC1F D3A7      	OUT	0A7H		;PORT 1BH IS AN OUTPUT PORT
+                
+ FC21 3E2C      	MVI	A,CINIT		;SET UP INPUT PORT HANDSHAKES
+ FC23 D3A0      	OUT	0A0H
+ FC25 D3A4      	OUT	0A4H
+ FC27 D3A6      	OUT	0A6H		;OUTPUT PORT 1BH HANDSHAKES
+                
+ FC29 3E24      	MVI	A,BINIT		;SET UP PORT 0BH HANDSHAKES
+ FC2B D3A2      	OUT	0A2H
+                
+ FC2D DBA1      	IN	CSTAT		;CLEAR CONTROLLER READY BIT
+                
+                ;-----------------------------------------------
+                ;READ THE PACK DESCRIPTOR PAGE (DISK PAGE 0)
+                ;TO GET THE OPSYS POINTERS:
+                ;  BYTES 41:40 = INITIAL DISK PAGE NUMBER
+                ;  BYTES 43:42 = DISK PAGE COUNT (BYTE 43=MSB=0)
+                ;ON ENTRY:
+                ;  B = PLATTER IN BITS <7:6>
+                ; DE = 0 = LOAD ADDRESS
+                ;-----------------------------------------------
+ FC2F 062B      	MVI	B,OSOFF+3	;BYTE COUNT TO END OF POINTERS
+ FC31 CD51FC    	CALL	GETPAG		;SEEK, READ PAGE HL INTO BUFFER
+                				;SET UP TO READ B BUFFER BYTES
+                
+ FC34 D5        	PUSH	D		;EXECUTION ADDRESS ON STACK
+                
+                ;READ FROM THE CONTROLLER BUFFER AND DISCARD EVERYTHING UNTIL
+                ;WE GET TO THE OPSYS POINTERS. LOAD THE OPSYS POINTERS INTO
+                ;C & HL. NOTE: NO TESTING ANY HANDSHAKE HERE - JUST ASSUME
+                ;THE CONTROLLER CAN KEEP UP. (THE CONTROLLER CAN SEND A DATA
+                ;BYTE EVERY 2.5 US.) THIS ONLY READS THE LOW BYTE OF THE
+                ;PAGE COUNT, SINCE THE HIGH BYTE MUST BE 0 ANYWAY.
+                
+ FC35 DBA5      PTRLUP:	IN	CDATA		;READ BYTE FROM CONTROLLER
+                
+ FC37 6C        	MOV	L,H		;SHIFT EVERYBODY OVER...
+ FC38 61        	MOV	H,C
+ FC39 4F        	MOV	C,A		;...AND PUT IT AWAY
+                
+ FC3A 05        	DCR	B
+ FC3B C235FC    	JNZ	PTRLUP
+                
+                ;-------------------------------------------------
+                ;READ C PAGES FROM DISK, STARTING AT PAGE HL, INTO
+                ;MEMORY STARTING AT THE ADDRESS ON THE STACK
+                ;ON ENTRY:
+                ;  B = PLATTER IN BITS <7:6>
+                ;  C = PAGE COUNT
+                ; DE = LDADDR (E=0)
+                ; HL = INITIAL DISK PAGE NUMBER
+                ;-------------------------------------------------
+ FC3E CD51FC    PAGELP:	CALL	GETPAG		;SEEK, READ PAGE HL INTO BUFFER
+                				;SET UP TO READ B BUFFER BYTES
+                				;B=0 HERE ALWAYS.
+                
+                ;LOAD 256 BYTES OF BUFFER DATA INTO MEMORY AT DE (B=0 HERE)
+                ;NOTE: NO TESTING ANY HANDSHAKE HERE - JUST ASSUME THE
+                ;CONTROLLER CAN KEEP UP. (THE CONTROLLER CAN SEND A DATA BYTE
+                ;EVERY 2.5 US.)
+                
+ FC41 DBA5      BYTELP:	IN	CDATA		;GET A DATA BYTE
+ FC43 12        	STAX	D		;WRITE IT TO RAM
+ FC44 1C        	INR	E		;WRITE ENTIRE PAGE
+ FC45 C241FC    	JNZ	BYTELP		;UNTIL DONE
+                
+                ; NEXT DISK PAGE
+                
+ FC48 14        	INR	D		;NEXT RAM PAGE
+ FC49 23        	INX	H		;NEXT DISK PAGE
+ FC4A 0D        	DCR	C		;BUMP DISK PAGE COUNT
+ FC4B C23EFC    	JNZ	PAGELP
+                
+                ;---------------------------------------------------
+                ;GO EXECUTE LOADED CODE, AT THE ADDRESS ON THE STACK
+                ;ON ENTRY:
+                ;  C = 0
+                ;---------------------------------------------------
+ FC4E C383FA    	JMP	EXECDP		;DISABLE PROM,
+                				;GO EXECUTE LOADED CODE
+                
+                ;***SUBROUTINE****************************************
+                ; SEEK AND READ DISK PAGE HL INTO 88-HDSK BUFFER 0
+                ; ON ENTRY:
+                ;   B = PLATTER IN BITS <7:6>
+                ; ON EXIT:
+                ;   A,FLAGS TRASHED, ALL OTHERS PRESERVED
+                ;   CONTROLLER HAS SPECIFIED SECTOR DATA IN ITS BUFFER
+                ;*****************************************************
+ FC51 E5        GETPAG:	PUSH	H		;SAVE REQUESTED PAGE
+ FC52 D5        	PUSH	D		;SAVE REGS
+ FC53 C5        	PUSH	B		;SAVE BYTE COUNT
+                
+                ;----------------------------------------------------------
+                ;COMPUTE CYLINDER AND SECTORX2  FROM DISK PAGE NUMBER IN HL
+                ; HL := HL / (2*HDSPT) (QUOTIENT=CYLINDER)
+                ;  A := HL MOD (2*HDSPT) (REMAINDER=SECTORX2)
+                ;THIS IS FAST ONLY IF THE CYLINDER NUMBER IS LOW. MITS
+                ;USUALLY PUT THE BOOT IMAGE STARTING AT CYLINDER 0, SIDE 1.
+                ;BUT WE WILL ALWAYS MISS THE NEXT SECTOR ANYWAY, SO EACH
+                ;SECTOR WILL REQUIRE A FULL DISK REV (25 MS), LOTS OF TIME.
+                ;----------------------------------------------------------
+ FC54 01D0FF    	LXI	B,-2*HDSPT
+ FC57 50        	MOV	D,B		;DE=FFFF=-1
+ FC58 58        	MOV	E,B		;SINCE LOOP GOES 1 EXTRA
+                
+ FC59 13        DIV1:	INX	D		;COMPUTE QUOTIENT=CYLINDER
+ FC5A 09        	DAD	B		;HL GETS REMAINDER
+ FC5B DA59FC    	JC	DIV1
+                
+ FC5E 7D        	MOV	A,L		;FIX REMAINDER, SINCE
+ FC5F 91        	SUB	C		;..LOOP WENT 1 EXTRA
+                
+ FC60 EB        	XCHG			;CYLINDER NUMBER TO HL
+                
+                ;--------------------------------------------------
+                ;COMPUTE SECTOR & SIDE
+                ;IF SECTORX2 > SECTORS/TRACK THEN SET CSIDE
+                ;BIT, AND REDUCE SECTOR NUMBER BY SECTORS/TRACK
+                ;  HL= QUOTIENT (CYLINDER)
+                ;  A = REMAINDER (SECTORX2, EITHER FOR HEAD 0 OR 1)
+                ;--------------------------------------------------
+ FC61 FE18      	CPI	HDSPT		;PAST END OF SIDE 0?
+ FC63 DA68FC    	JC	SIDEOK		;N: SECTOR NUMBER IS GOOD
+                
+ FC66 C608      	ADI	CSIDE-HDSPT	;COMPUTE SECTOR MOD HDSPT,
+                				;..AND SET SIDE 1 BIT
+                
+ FC68 B0        SIDEOK:	ORA	B		;COMBINE PLATTER BITS
+ FC69 4F        	MOV	C,A		;SAVE SECTOR # WITH SIDE
+                
+                ;------------------------------------------
+                ;SEEK CYLINDER
+                ;  B = PLATTER IN BITS <7:6>
+                ;  C = SECTOR NUMBER, WITH SIDE AND PLATTER
+                ;  HL = CYLINDER NUMBER<9:0>
+                ;------------------------------------------
+                 IF CSEEK+DBUFR			;THESE ARE ACTUALLY 00
+                	MOV	A,H		;H<1:0>=CYLINDER<9:8> 
+                	ORI	CSEEK+DBUFR	;COMBINE WITH SEEK OPERATION
+                	MOV	H,A
+                 ENDIF
+                
+ FC6A CD80FC    	CALL	HDSKC		;HL=SEEK COMMAND WITH CYL #
+                
+                ;---------------------------------------------------------
+                ;READ SECTOR FROM CURRENT TRACK INTO CONTROLLER'S BUFFER 0
+                ;  C<7:6> = PLATTER
+                ;    C<5> = SIDE
+                ;  C<4:0> = SECTOR NUMBER
+                ;---------------------------------------------------------
+ FC6D 79        	MOV	A,C
+ FC6E CD81FC    	CALL	HDSKCA		;LOW COMMAND BYTE IS IN A
+                
+                ;--------------------------------------------
+                ;ISSUE CRDBUF COMMAND TO KICK OFF READ OF
+                ;256 BYTES FROM THE CONTROLLER'S BUFFER
+                ;NOTE: THIS ASSUMES THE CONTROLLER IS READY.
+                ;(AND IT IS, BECAUSE HDSKC LEFT IT THAT WAY.)
+                ;--------------------------------------------
+ FC71 DBA5      	IN	CDATA		;RESET CDA IN CDSTA
+ FC73 DBA3      	IN	ACMD		;CLEAR CMDACK IN ACSTA
+                
+ FC75 AF        	XRA	A		;256 BYTES TO LOAD
+ FC76 D3A7      	OUT	ADATA		;..TO CONTROLLER
+                
+ FC78 3E50      	MVI	A,CRDBUF+DBUFR	;ISSUE READ BUFFER COMMAND
+ FC7A D3A3      	OUT	ACMD		;..TO CONTROLLER
+                
+ FC7C C1        	POP	B		;(10)
+ FC7D D1        	POP	D		;(10)
+ FC7E E1        	POP	H		;(10) 15 US TOTAL FROM 'OUT'
+                
+                ; THE 8X300 IS READY TO TRANSMIT DATA IN 8 US. THIS CODE TAKES
+                ; 40 CYCLES (INCLUDING THE 'RET'), OR 20 US MIN TO GET AROUND
+                ; TO READING THE DATA - SO THERE IS NO NEED TO WAIT ON CDSTA
+                
+                 IF FALSE
+                DATAWT:	IN	CDSTA		;WAIT FOR DATA PORT TO BE READY
+                	RLC			;MSB=CDA
+                	JNC	DATAWT
+                 ENDIF
+                
+                ;---------------------------------
+                ;CONTROLLER IS READY TO TRANSFER
+                ;256 BYTES OF DATA FROM ITS BUFFER
+                ;---------------------------------
+ FC7F C9        	RET			;(10)DONE WITH GETPAG
+                
+                ;***SUBROUTINE*************************************************
+                ; ISSUE A DISK COMMAND, AND THEN WAIT FOR THE CONTROLLER
+                ; TO COMPLETE IT
+                ;
+                ; NOTE: THIS JUST ASSUMES THE CONTROLLER IS READY, WHICH IS OK
+                ; SINCE THE LAST COMMAND WAS EITHER A SEEK (WHERE HDSKC WAITED
+                ; FOR THE CONTROLLER TO BECOME READY) OR IT WAS A CRDBUF, WHICH
+                ; ENDED WITH ALL BYTES TRANSFERRED - AND THE CONTROLLER BECOMES
+                ; READY VERY SOON (1.5 US) AFTER THE LAST BYTE IS TRANSFERRED.
+                ; ON ENTRY AT HDSKC:
+                ;   HL = COMPLETE COMMAND
+                ; ON ENTRY AT HDSKCA:
+                ;   A=LOW BYTE OF COMMAND
+                ;   H=HIGH BYTE OF COMMAND
+                ; ON EXIT:
+                ;   A,FLAGS TRASHED, ALL OTHERS PRESERVED.
+                ;   THE COMMAND IS COMPLETED AND THE CONTROLLER IS READY.
+                ;   ANY ERRORS WILL TERMINATE THE LOAD, AND PRINT AN ERROR
+                ;   MESSAGE ON THE TERMINAL 
+                ;**************************************************************
+ FC80 7D        HDSKC:	MOV	A,L		;LOW BYTE OF COMMAND
+                
+ FC81 D3A7      HDSKCA:	OUT	ADATA		;..TO DATA PORT
+                
+ FC83 DBA1      	IN	CSTAT		;RESET CRDY FLAG JUST IN CASE
+ FC85 DBA3      	IN	ACMD		;CLEAR CMDACK IN ACSTA
+                
+ FC87 7C        	MOV	A,H		;COMMAND HIGH BYTE
+ FC88 D3A3      	OUT	ACMD		;ISSUE COMMAND
+                
+ FC8A DBA0      HDWAIT:	IN	CREADY		;IS THE CONTROLLER DONE? 
+ FC8C 07        	RLC			;LOOK AT MSB=CRDY
+ FC8D D28AFC    	JNC	HDWAIT		;N: KEEP WAITING
+                
+ FC90 DBA1      	IN	CSTAT		;RESET CRDY FLAG
+ FC92 E67F      	ANI	ERMASK		;AND GET A=ERROR CODE
+ FC94 C8        	RZ			;NO ERRORS: HAPPY RETURN
+                
+                ; REPORT A LOAD ERROR AND GO TO AMON'S MAIN LOOP
+                ; ON ENTRY:
+                ;   A = ERROR FLAG BITS
+                ;  HL = DISK COMMAND
+                
+ FC95 CD3DFE    	CALL	PCAHEX		;PRINT ERROR CODE IN HEX
+ FC98 C3D3FF    	JMP	HDERR		;FINISH THE ERROR MESSAGE
+                
+                ;***COMMAND ROUTINE****************************************
+                ; HL [<OFST>] (INTEL HEX LOAD FROM TRANSFER PORT)
+                ;
+                ; LOAD AN INTEL HEX FILE FROM THE TRANSFER PORT INTO MEMORY
+                ; AT THE ADDRESSES SPECIFIED IN THE HEX FILE, WITH OPTIONAL
+                ; ADDRESS OFFSET <OFST>. DONE WHEN ANY RECORD WITH 0 DATA
+                ; BYTES IS ENCOUNTERED, OR IF CONTROL-C IS TYPED.
+                ;
+                ; ON ENTRY:
+                ;  HL= ADDRESS OFFSET FROM USER (DEFAULTS TO 0)
+                ;
+                ; REGISTER USAGE DURING HEX LOAD:
+                ;   B: SCRATCH
+                ;   C: RECORD BYTE COUNTER
+                ;   D: RECORD CHECKSUM
+                ;   E: RECORD BYTE COUNT FOR EOF TEST
+                ;   HL: MEMORY ADDRESS
+                ;   TOP OF STACK: ADDRESS OFFSET
+                ;   NEXT ON STACK: RECORD COUNT
+                ;**********************************************************
+ FC9B E5        HLCMD:	PUSH	H		;ADDRESS OFFSET ONTO STACK
+                
+ FC9C 210000    	LXI	H,0		;INITIALIZE RECORD COUNT
+ FC9F E5        	PUSH	H		;ONTO STACK TOO
+                
+                ;EAT ALL CHARACTERS UNTIL WE GET RECORD-START COLON
+                
+ FCA0 CD89FD    GETCOL:	CALL	GETTPD
+ FCA3 D63A      	SUI	':'
+ FCA5 C2A0FC    	JNZ	GETCOL
+                
+ FCA8 57        	MOV	D,A		;D=0: INIT CHECKSUM
+                
+ FCA9 CD4FFD    	CALL	ILPRNT		;PRINT A PACIFIER PER RECORD
+ FCAC AE        	DB	PCFIER+80H
+                
+                ;RESTART CHECKSUM, THEN GET 4-BYTE RECORD HEADER: (A=0 HERE)
+                ; C GETS 1ST BYTE = DATA BYTE COUNT
+                ; H GETS 2ND BYTE = ADDRESS HIGH BYTE
+                ; L GETS 3RD BYTE = ADDRESS LOW BYTE
+                ; B GETS 4TH BYTE = RECORD TYPE (IGNORED)
+                
+ FCAD 1E04      	MVI	E,4		;GET 4 HEADER BYTES
+                
+                ;SHIFT IN THE FOUR HEADER BYTES: C <- H <- L <- B
+                
+ FCAF 4C        HEDRLP:	MOV	C,H		;C=BYTE 1: BYTE COUNT
+ FCB0 65        	MOV	H,L		;H=BYTE 2: ADDRESS MSB
+ FCB1 68        	MOV	L,B		;L=BYTE 3: ADDRESS LSB
+ FCB2 CD9EFD    	CALL	GETTPH		;GET HEADER BYTE, DO CHECKSUM
+ FCB5 1D        	DCR	E
+ FCB6 C2AFFC    	JNZ	HEDRLP
+                
+                ;OFFSET THE ADDRESS BY THE VALUE ON TOP OF THE STACK
+                ;AND BUMP THE RECORD COUNT. A=CHECKSUM SO FAR HERE
+                
+ FCB9 D1        	POP	D		;GET OFFSET
+ FCBA 19        	DAD	D		;OFFSET THE ADDRESS IN HL
+                
+ FCBB E3        	XTHL			;BUMP RECORD COUNT
+ FCBC 23        	INX	H
+ FCBD E3        	XTHL			;..LEAVING IT ON THE STACK
+                
+ FCBE D5        	PUSH	D		;SAVE OFFSET
+                
+ FCBF 57        	MOV	D,A		;D=CHECKSUM SO FAR
+ FCC0 59        	MOV	E,C		;REMEMBER COUNT FOR EOF TEST
+                
+                ;C = E = RECORD BYTE COUNT
+                ;HL = RAM ADDRESS FOR THIS RECORD=RECORD ADDRESS+OFFSET
+                
+ FCC1 79        	MOV	A,C		;C=RECORD BYTE COUNT
+ FCC2 B7        	ORA	A		;0-BYTE RECORD?
+ FCC3 CADDFC    	JZ	GETCSM
+                
+                ;LOOP TO GET DATA INTO MEMORY AT HL.
+                
+ FCC6 CD9EFD    DATALP:	CALL	GETTPH		;DATA BYTE IN B, CKSM IN D
+                
+                ;SEE IF THIS BYTE WILL OVERWRITE OUR RAM AREA. THIS BLOCKS
+                ;OUT A 256-BYTE REGION OF MEMORY WHEREVER THIS PROGRAM FOUND
+                ;RAM FOR ITS STACK.
+                
+ FCC9 CDE7FF    	CALL	HRMPAG		;(STUFFS HL ON STACK)
+ FCCC 7C        	MOV	A,H		;A=RAM PAGE ADDRESS
+ FCCD E1        	POP	H		;RESTORE RAM ADDRESS
+ FCCE BC        	CMP	H		;SAME AS AMON'S RAM PAGE?
+ FCCF CA63FF    	JZ	OVRERR		;Y:ABORT WITH OVERWRITE ERROR
+                
+                ;WRITE TO MEMORY, AND VERIFY THE WRITE
+ FCD2 70        	MOV	M,B		;STORE DATA IN RAM
+ FCD3 7E        	MOV	A,M
+ FCD4 B8        	CMP	B
+ FCD5 C2CAFF    	JNZ	MEMERR		;SUCCESSFUL WRITE?
+ FCD8 23        	INX	H
+                
+ FCD9 0D        	DCR	C
+ FCDA C2C6FC    	JNZ	DATALP
+                
+ FCDD CD9EFD    GETCSM:	CALL	GETTPH		;GET CHECKSUM IN A & Z FLAG
+ FCE0 C2C7FF    	JNZ	CSMERR		;SHOULD BE ZERO
+                
+                ;ALL DONE WITH THIS RECORD. CHECK FOR EOF (BYTE COUNT=0)
+                
+ FCE3 B3        	ORA	E		;ZERO-BYTE RECORD?
+ FCE4 C2A0FC    	JNZ	GETCOL		;N: GO GET ANOTHER RECORD
+                
+                ;-------------------------------------------
+                ;DONE. PRINT RECORD COUNT AND RETURN TO MAIN
+                ;-------------------------------------------
+ FCE7 E1        HLDONE:	POP	H		;REMOVE OFFSET FROM STACK
+ FCE8 E1        	POP	H		;RECORD COUNT
+                
+ FCE9 CD4AFD    	CALL	CILPRT
+                
+                 IF EPROM32
+ FCEC 5265636F72	DB	'Records:',' '+80H
+                 ENDIF ;EPROM32
+                 IF NOT EPROM32
+                	DB	'Recs:',' '+80H
+                 ENDIF ;NOT EPROM32
+                
+                ;FALL INTO PHLCHX
+                
+                ;***SUBROUTINE***************************
+                ; PRINT HL AS 4 HEX DIGITS ON THE CONSOLE
+                ; ON ENTRY:
+                ;   C=CHECKSUM SO FAR
+                ;  HL=2 BYTES TO PRINT
+                ; ON EXIT:
+                ;   B=0
+                ;   C=UPDATED CHECKSUM
+                ; TRASHES A
+                ;*****************************************
+ FCF5 0600      PHLCHX:	MVI	B,0	;PRINT ON CONSOLE
+ FCF7 C337FE    	JMP	PHLHEX
+                
+                ;***COMMAND ROUTINE***************************************
+                ; EN [<ADR>] (ENTER DATA INTO MEMORY)
+                ;
+                ; GET HEX VALUES FROM THE KEYBOARD AND ENTER THEM
+                ; SEQUENTIALLY INTO MEMORY, STARTING AT <ADR>. A BLANK
+                ; LINE ENDS THE ROUTINE AND RETURNS CONTROL TO THE
+                ; COMMAND MODE. VALUES MAY BE SEPARATED BY SPACES OR CR'S.
+                ; PRINT THE CURRENT ADDRESS AT THE BEGINNING OF EACH LINE.
+                ; ON ENTRY:
+                ;  HL = <ADR>, DEFAULTING TO 0
+                ;  CARRY SET IF NONE ENTERED
+                ;*********************************************************
+ FCFA CD5FFE    ENCMD:	CALL	PHLADR		;PRINT HL AS AN ADDRESS
+                
+ FCFD CDD9FB    	CALL	GETLIN		;GET A LINE OF USER INPUT
+ FD00 C8        	RZ			;Z=BLANK LINE TERMINATES
+                
+                ;GET HEX DATA FROM THE USER INPUT LINE AND WRITE IT TO MEMORY
+                
+ FD01 CD1AF9    ENLOOP:	CALL	PHFHEX		;SAVE MEMORY ADDRESS,
+                				;GET/CONVERT VALUE
+                
+ FD04 7D        	MOV	A,L		;GET LOW BYTE AS CONVERTED
+ FD05 E1        	POP	H		;RECOVER MEMORY ADDRESS
+                
+ FD06 77        	MOV	M,A		;PUT IN THE VALUE
+ FD07 23        	INX	H		;NEXT ADDRESS
+                
+ FD08 CDEDFB    	CALL	SSPACE		;SCAN TO NEXT INPUT VALUE
+ FD0B C201FD    	JNZ	ENLOOP		;NOT END OF LINE: CONTINUE
+                
+ FD0E C3FAFC    	JMP	ENCMD		;END OF LINE: START NEW LINE
+                
+                ;===============
+                ;= SUBROUTINES =
+                ;===============
+                
+                ;***SUBROUTINE**********************************************
+                ; GET, ECHO, AND STORE A CONSOLE CHARACTER IN THE INPUT
+                ; LINE BUFFER. HANDLE DELETES AND BACKSPACES.
+                ;
+                ; ON ENTRY:
+                ;  HL = NEXT FREE SPOT IN THE INPUT LINE BUFFER
+                ;  LBSIZE IS MAX CHARACTERS ALLOWED IN THE INPUT LINE BUFFER
+                ;ON EXIT (NOT FULL, NO DELETES):
+                ;      A=CHARACTER
+                ;     HL = HL+1
+                ; (HL-1) = CHARACTER
+                ;***********************************************************
+ FD11 CDD2FB    LBCHR:	CALL	GETKBD		;GET A CHARACTER
+                
+ FD14 77        	MOV	M,A		;STORE CHARACTER IN BUFFER
+                
+ FD15 FE7F      	CPI	DEL		;DEL CHARACTER?
+ FD17 CA1CFD    	JZ	GCDEL
+ FD1A FE08      	CPI	BS		;BS IS SAME AS DEL
+ FD1C 7D        GCDEL:	MOV	A,L		;BUFFER ADDRESS LOW BYTE
+ FD1D CA28FD    	JZ	GDELET
+                
+ FD20 EECB      	XRI	RAMBUF+LBSIZE	;INPUT BUFFER FULL?
+ FD22 7E        	MOV	A,M		;RECOVER CHR FOR ECHO
+ FD23 C8        	RZ			;FULL: IGNORE IT
+                
+ FD24 23        	INX	H		;BUMP LINE BUFFER POINTER
+                
+ FD25 C38EF8    	JMP	PRINTA		;ECHO & RET
+                
+                ;-----------------------------------------------------------
+                ;BACKSPACE OR DELETE FOUND. DELETE IF THERE IS ANYTHING TO
+                ;DELETE, AND ECHO TO THE USER THE RIGHT WAY, BASED ON TTYPE.
+                ;-----------------------------------------------------------
+ FD28 D67B      GDELET:	SUI	RAMBUF		;ANYTHING ON THE LINE?
+ FD2A C8        	RZ			;DONE IF NOT.
+                
+                ;BACKSPACE EITHER BY ERASING ONSCREEN OR TELETYPE-STYLE
+                
+ FD2B 2D        	DCR	L		;BACK UP IN BUFFER
+                
+ FD2C 3E68      	MVI	A,TTYPE-RIOCOD+RAMCOD
+ FD2E CDE7FF    	CALL	HRMPAG		;PUSHES HL TOO
+ FD31 7E        	MOV	A,M		;GET TTYPE VARIABLE
+ FD32 E1        	POP	H
+ FD33 1F        	RAR			;0 (EVEN): BACKSPACING TERMINAL
+ FD34 D243FD    	JNC	GCBKUP
+                
+                ;TELETYPE-STYLE DELETE
+                
+ FD37 CD3EFD    	CALL	PSLASH		;PRINT DELETED CHARACTER
+                
+ FD3A 7E        	MOV	A,M		;..BETWEEN SLASHES
+ FD3B CD8EF8    	CALL	PRINTA
+                
+                ;FALL INTO PSLASH
+                
+                ;---LOCAL SUBROUTINE---
+                ;PRINT SLASH
+                ;----------------------
+ FD3E CD4FFD    PSLASH:	CALL	ILPRNT
+ FD41 AF        	DB	'/'+80H
+ FD42 C9        	RET
+                
+                ;TERMINAL-STYLE DELETE
+                
+ FD43 CD4FFD    GCBKUP:	CALL	ILPRNT		;BACK UP ON SCREEN
+ FD46 082088    	DB	BS,' ',BS+80H	;ERASE OLD CHARACTER & BACK UP
+                
+ FD49 C9        	RET
+                
+                ;***SUBROUTINE******************************
+                ; PRINT CR LF THEN INLINE STRING AT (SP)
+                ; CALLS TO CILPRT ARE FOLLOWED BY THE STRING
+                ; THE LAST STRING BYTE HAS ITS MSB SET
+                ; ON EXIT:
+                ;    A = 80H
+                ;    Z & CARRY CLEARED
+                ;    ALL OTHER REGISTERS PRESERVED
+                ;*******************************************
+ FD4A CD4FFD    CILPRT:	CALL	ILPRNT
+ FD4D 0D8A      	DB	CR,LF+80H
+                
+                ;FALL INTO ILPRNT
+                
+                ;***SUBROUTINE******************************
+                ; PRINT INLINE STRING AT (SP)
+                ; CALLS TO ILPRNT ARE FOLLOWED BY THE STRING
+                ; THE LAST STRING BYTE HAS ITS MSB SET
+                ; ON EXIT:
+                ;    A = 80H
+                ;    Z & CARRY CLEARED
+                ;    ALL OTHER REGISTERS PRESERVED
+                ;*******************************************
+ FD4F E3        ILPRNT:	XTHL			;SAVE HL, GET STRING ADDRESS
+                
+ FD50 7E        IPLOOP:	MOV	A,M		;LOOP THROUGH MESSAGE
+ FD51 E67F      	ANI	7FH		;STRIP END-MARKER
+ FD53 CD8EF8    	CALL	PRINTA
+ FD56 AE        	XRA	M		;END? (CLEARS CARRY TOO)
+ FD57 23        	INX	H
+ FD58 CA50FD    	JZ	IPLOOP
+                
+ FD5B E3        	XTHL			;RESTORE HL
+                				;..GET RET ADDRESS
+ FD5C C9        	RET
+                
+                ;***SUBROUTINE*****************************
+                ; GET CONSOLE KEYBOARD DATA
+                ; ON ENTRY:
+                ;   A KEYBOARD CHARACTER IS ALREADY WAITING
+                ; ON EXIT:
+                ;   A=KEYBOARD CHARACTER, PARITY STRIPPED
+                ;   Z CLEAR (UNLESS NULL TYPED)
+                ;******************************************
+ FD5D DB11      KDATA:	IN	S2RXDA		;GET KEYBOARD CHARACTER
+ FD5F E67F      	ANI	7FH		;STRIP PARITY
+ FD61 C9        	RET
+                
+                ;***SUBROUTINE***************************************
+                ; GET KEYBOARD STATUS UNLESS THE TRANSFER PORT IS THE
+                ; CONSOLE. ABORT IF CABKEY (CONTROL-C).
+                ; ON EXIT:
+                ;   IF A CHARACTER IS WAITING, THEN CHARACTER IS IN A
+                ;   IF NO CHARACTER WAITING, Z SET, A=0
+                ;****************************************************	
+ FD62 CD7FFD    CKABRT:	CALL	TESTTP		;TRANSFER PORT = CONSOLE?
+ FD65 C8        	RZ
+                
+                ;FALL INTO CHKKBD
+                
+                ;***SUBROUTINE***************************************
+                ; GET KEYBOARD STATUS. IF A CHARACTER IS WAITING,
+                ; THEN RETURN IT IN A WITH PARITY STRIPPED. ABORT
+                ; IF CABKEY (CONTROL-C).
+                ; ON EXIT:
+                ;   IF A CHARACTER IS WAITING, THEN CHARACTER IS IN A
+                ;   IF NO CHARACTER WAITING, Z SET, A=0
+                ;****************************************************	
+ FD66 CD7FF8    CHKKBD:	CALL	KSTAT		;ANYTHING TYPED?
+ FD69 C8        	RZ			;N: RETURN W/ Z SET
+                
+ FD6A CD5DFD    	CALL	KDATA		;Y: GET THE DATA
+ FD6D FE03      	CPI	CABKEY		;ABORT CHARACTER TYPED?
+ FD6F C0        	RNZ
+                
+ FD70 B7        	ORA	A		;CLEAR Z FLAG TO PREVENT
+ FD71 C3DFF8    	JMP	CABORT		;..ADDRESS FROM BEING PRINTED
+                
+                ;***SUBROUTINE***************
+                ; GET TRANSFER PORT RX STATUS
+                ; ON EXIT:
+                ;   A=0 & Z SET IF NO DATA
+                ;****************************
+ FD74 3E2C      TPISTA:	MVI	A,RTPIS-RIOCOD+RAMCOD
+                
+ FD76 B7        	ORA	A		;CLEAR CARRY
+ FD77 DA        	DB	JC		;JC OPCODE SKIPS MVI A BELOW
+                
+                ;SKIP INTO TPIN, SKIPPING MVI A INSTRUCTION
+                
+                ;***SUBROUTINE***************
+                ; GET TRANSFER PORT DATA
+                ; ON EXIT:
+                ;   A=BYTE FROM TRANSFER PORT
+                ;   Z CLEARED
+                ;****************************
+ FD78 3E32      TPIN:	MVI	A,RTPIN-RIOCOD+RAMCOD
+                
+ FD7A CDE7FF    	CALL	HRMPAG		;PUSHES H
+                
+ FD7D E3        	XTHL			;FIX HL, PUT ADDRESS ON STACK
+ FD7E C9        	RET			;'CALL' RTPIN
+                
+                ;***SUBROUTINE**************************
+                ; TEST TO SEE IF TRANSFER PORT = CONSOLE
+                ; ON EXIT:
+                ;   Z SET IF CONSOLE = TRANSFER PORT
+                ; TRASHES A
+                ;***************************************
+ FD7F 3E2D      TESTTP:	MVI	A,TPISP+1-RIOCOD+RAMCOD	;STATUS REGISTER ADDR
+ FD81 CDE7FF    	CALL	HRMPAG			;PUSHES H
+                
+ FD84 7E        	MOV	A,M
+ FD85 E1        	POP	H
+                
+ FD86 FE10      	CPI	S2STAA			;CONSOLE'S STATUS PORT?
+ FD88 C9        	RET
+                
+                ;***SUBROUTINE*******************************************
+                ; GET A PRINTABLE ASCII BYTE FROM THE TRANSFER PORT,
+                ; STRIP PARITY, CHECK FOR ABORT FROM THE CONSOLE
+                ; UNLESS THE CONSOLE IS ALSO THE TRANSFER PORT
+                ; ON ENTRY:
+                ;   SP POINTS INTO THE RAM PAGE
+                ;   RAM PAGE BYTE FE = 1 FOR TRANSFER PORT, 0 FOR CONSOLE
+                ; ON EXIT:
+                ;   CHARACTER IN A, WITH PARITY STRIPPED
+                ;********************************************************
+ FD89 CD7FFD    GETTPD:	CALL	TESTTP		;TRANSFER PORT = CONSOLE?
+ FD8C CAD2FB    	JZ	GETKBD		;Y: GET AND TEST KEYBOARD CHR
+                
+ FD8F CD66FD    GTPLUP:	CALL	CHKKBD		;USER ABORT?
+ FD92 CD74FD    	CALL	TPISTA		;TRANSFER PORT CHARACTER?
+ FD95 CA8FFD    	JZ	GTPLUP		;N: KEEP WAITING
+                
+ FD98 CD78FD    	CALL	TPIN		;GET TRANSFER PORT CHARACTER
+ FD9B E67F      	ANI	7FH		;STRIP PARITY
+                
+ FD9D C9        	RET
+                
+                ;***SUBROUTINE*****************************************
+                ; GET 2 HEX DIGITS FROM THE TRANSFER PORT, COMBINE THEM
+                ; INTO 1 BYTE, AND ADD THE RESULT TO THE CHECKSUM IN D
+                ; ON ENTRY:
+                ;   D = CHECKSUM SO FAR
+                ; ON EXIT:
+                ;   B=BYTE OF DATA
+                ;   A=D=NEW CHECKSUM VALUE
+                ;   Z FLAG SET IF CHECKSUM IS NOW 0
+                ;   ALL OTHER REGISTERS PRESERVED, UNLESS ERROR ABORT
+                ;******************************************************
+ FD9E CDAEFD    GETTPH:	CALL	GETTPN		;GET HIGH NIBBLE
+ FDA1 87        	ADD	A		;SHIFT HIGH NIBBLE IN PLACE
+ FDA2 87        	ADD	A
+ FDA3 87        	ADD	A
+ FDA4 87        	ADD	A
+ FDA5 47        	MOV	B,A
+ FDA6 CDAEFD    	CALL	GETTPN		;GET LOW NIBBLE
+                
+ FDA9 B0        	ORA	B		;COMBINE NIBBLES
+ FDAA 47        	MOV	B,A		;SAVE RESULT FOR RETURN
+ FDAB 82        	ADD	D		;COMPUTE CHECKSUM
+ FDAC 57        	MOV	D,A		;RET WITH CHECKSUM IN A & D
+ FDAD C9        	RET
+                
+                ;---LOCAL SUBROUTINE---------------------
+                ; GET A HEX DIGIT FROM THE TRANSFER PORT,
+                ; VALIDATE IT, AND RETURN IT IN A<3:0>
+                ;----------------------------------------
+ FDAE CD89FD    GETTPN:	CALL	GETTPD
+ FDB1 CD6EFE    	CALL	HEXCON
+ FDB4 D8        	RC			;CARRY MEANS OK
+                
+                ;ABORT: ASCII CHARACTER ERROR - NOT A VALID HEX DIGIT
+                
+ FDB5 3E48      	MVI	A,HERMSG
+ FDB7 C3CCFF    	JMP	RPTERR
+                
+                ;==================================================
+                ; COMMAND TABLE
+                ; EACH ENTRY:
+                ;   BYTE 0 = 1ST COMMAND CHARACTER
+                ;   BYTE 1 = 2ND COMMAND CHARACTER
+                ;   BYTE 2 = COMMAND EXECUTION ADDRESS LOW BYTE
+                ;   BYTE 3<6:0> = COMMAND EXECUTION ADDRESS<14:8>
+                ;                 (ADDRESS<15> IS ASSUMED TO BE 1)
+                ;   BYTE 3<7> = 0 IF THE COMMAND'S PARAMETERS ARE
+                ;               NOT HEXIDECIMAL VALUES
+                ;
+                ; THE TABLE IS TERMINATED BY A NULL IN BYTE 0
+                ;==================================================
+                
+                ;TABLE IS IN LOWER HALF OF 2732 EPROM
+                 IF EPROM32
+ FDBA =         H1END	EQU	$
+ F000           	ORG MON32A
+                 ENDIF ;EPROM32
+                
+ F000 4144      COMTAB:	DB	'AD'		;DUMP IN ALTAIR FORMAT
+ F002 41F9      	DW	ADCMD
+ F004 414C      	DB	'AL'		;LOAD ALTAIR FORMAT
+ F006 06FE      	DW	ALCMD
+                
+ F008 424F      	DB	'BO'		;BOOT FROM FLOPPY
+ F00A 06FF      	DW	BOCMD
+ F00C 434F      	DB	'CO'		;COPY MEMORY
+ F00E 92F9      	DW	COCMD
+ F010 4455      	DB	'DU'		;DUMP TO CONSOLE
+ F012 91FA      	DW	DUCMD
+ F014 454E      	DB	'EN'		;ENTER
+ F016 FAFC      	DW	ENCMD
+ F018 4558      	DB	'EX'		;EXECUTE
+ F01A 7EFA      	DW	EXCMD
+ F01C 4649      	DB	'FI'		;FILL MEMORY
+ F01E DAFA      	DW	FICMD
+                
+ F020 4842      	DB	'HB'		;BOOT FROM HARD DISK
+ F022 07FC      	DW	HBCMD
+                
+ F024 4844      	DB	'HD'		;INTEL HEX DUMP
+ F026 3EFB      	DW	HDCMD
+ F028 484C      	DB	'HL'		;INTEL HEX LOAD
+ F02A 9BFC      	DW	HLCMD
+                
+ F02C 494E      	DB	'IN'		;INPUT FROM PORT
+ F02E 27FE      	DW	INCMD
+ F030 4F54      	DB	'OT'		;OUTPUT TO PORT
+ F032 2CFB      	DW	OTCMD
+                
+ F034 5345      	DB	'SE'		;SEARCH
+ F036 EBF9      	DW	SECMD
+                
+ F038 5445      	DB	'TE'		;TERMINAL MODE
+ F03A F37A      	DW	TECMD AND 7FFFH ;NON-HEX PARAMETER
+                
+ F03C 5450      	DB	'TP'		;SET TRANSFER PORT
+ F03E 49F8      	DW	TPCMD
+ F040 5454      	DW	'TT'		;TERMINAL TYPE
+ F042 76FA      	DW	TTCMD
+                
+ F044 5645      	DB	'VE'		;VERIFY
+ F046 C8F9      	DW	VECMD
+                
+                 IF EPROM32
+ F048 4D54      	DB	'MT'		;MEMORY TEST
+ F04A 51F0      	DW	MTCMD
+                
+ F04C 3F00      	DB	'?',0		;HELP COMMAND
+ F04E 0571      	DW	HLPCMD AND 7FFFH ;NON-HEX PARAMETER
+                 ENDIF ;EPROM32
+                
+ F050 00        	DB	0		;END OF TABLE MARK
+                
+                ;=======================================================
+                ;THE FOLLOWING CODE IS IN THE LOWER HALF OF A 2732 EPROM
+                ;=======================================================
+                
+                 IF EPROM32
+                
+                ;***2732 COMMAND ROUTINE**********************************
+                ;MT [<ADR> [<CNT>]] (TEST MEMORY)
+                ;
+                ;ON ENTRY:
+                ;  CARRY SET IF NO PARAMETERS PROVIDED
+                ;  HL=<ADR>
+                ;  DE POINTS TO <CNT>
+                ; ON ENTRY:
+                ;  HL = <ADR>, DEFAULTING TO 0
+                ;  CARRY SET IF NONE ENTERED
+                ;*********************************************************
+ F051 CD1AF9    MTCMD:	CALL	PHFHEX		;PUSH <ADR>, GET HL=<CNT>
+                				;HL=0 IF NONE ENTERED
+ F054 CD4AFD    	CALL	CILPRT
+ F057 5465737469	DB	'Testin','g'+80H
+                
+ F05E EB        	XCHG			;DE=BYTE COUNT
+                
+ F05F CDE9FF    	CALL	RAMPAG		;GET OUR RAM PAGE
+ F062 7C        	MOV	A,H		;A=AMON'S RAM PAGE
+                
+ F063 E1        	POP	H		;HL=START ADDRESS
+                
+ F064 01E7F0    	LXI	B,MTPAT		;TEST PATTERN SEQUENCE
+                
+                ;LOOP UNTIL ALL MEMORY LOCATIONS HAVE SEEN EACH PATTERN BYTE
+                
+ F067 E5        MTLOOP:	PUSH	H		;START ADDRESS
+ F068 D5        	PUSH	D		;BYTE COUNT
+ F069 C5        	PUSH	B		;PATTERN POSITION
+ F06A F5        	PUSH	PSW		;A=RAM PAGE
+                	
+                ;------------------------------------------------
+                ;FILL MEMORY WITH PATTERN, AVOIDING THE STACK. DO
+                ;A READ/INVERT/WRITE TWICE TO STRESS THE MEMORY.
+                ;------------------------------------------------
+ F06B F1        FIL0:	POP	PSW		;A=RAM PAGE ADDRESS
+ F06C F5        	PUSH	PSW
+                
+ F06D AC        	XRA	H		;ON RAM PAGE?
+ F06E B5        	ORA	L		;FIRST BYTE OF THIS PAGE?
+ F06F C274F0    	JNZ	FIL1
+                
+ F072 2E7B      	MVI	L,RAMBUF	;Y: SKIP OVER STACK SPACE	
+                
+ F074 0A        FIL1:	LDAX	B		;GET A PATTERN BYTE
+                
+ F075 B7        	ORA	A		;PATTERN END?
+ F076 C27CF0    	JNZ	FIL2
+ F079 01E7F0    	LXI	B,MTPAT		;Y: RESTART PATTERN
+                
+ F07C 03        FIL2:	INX	B
+                
+                ;HIGH-FREQUENCY MEMORY BYTE TEST WHILE
+                ;WE FILL MEMORY WITH THE PATTERN
+                
+ F07D 77        	MOV	M,A		;WRITE PATTERN TO MEMORY
+                
+ F07E 7E        	MOV	A,M		;INVERT & WRITE
+ F07F 2F        	CMA
+ F080 77        	MOV	M,A
+                
+ F081 7E        	MOV	A,M		;TWICE
+ F082 2F        	CMA
+ F083 77        	MOV	M,A
+                
+ F084 23        	INX	H		;NEXT ADDRESS
+                
+ F085 1B        	DCX	D		;BYTE COUNT
+ F086 7A        	MOV	A,D		;END?
+ F087 B3        	ORA	E
+ F088 C26BF0    	JNZ	FIL0		;N: KEEP FILLING
+                
+ F08B F1        	POP	PSW		;A=RAM PAGE ADDRESS
+ F08C C1        	POP	B		;PATTERN POSITION
+ F08D D1        	POP	D		;BYTE COUNT
+ F08E E1        	POP	H		;START ADDRESS
+                
+                ;-------------------------------------------------
+                ;COMPARE MEMORY TO THE PATTERN, AVOIDING THE STACK
+                ;-------------------------------------------------
+ F08F E5        	PUSH	H		;START ADDRESS
+ F090 D5        	PUSH	D		;BYTE COUNT
+ F091 C5        	PUSH	B		;PATTERN POSITION
+ F092 F5        	PUSH	PSW		;RAM PAGE ADDRESS
+                
+ F093 F1        CMLOOP:	POP	PSW		;A=RAM PAGE
+ F094 F5        	PUSH	PSW
+                
+ F095 AC        	XRA	H		;ON RAM PAGE?
+ F096 B5        	ORA	L		;FIRST BYTE ON THAT PAGE?
+ F097 C29CF0    	JNZ	CML1		;N: OKAY
+ F09A 2E7B      	MVI	L,RAMBUF	;Y: SKIP STACK
+                
+ F09C 0A        CML1:	LDAX	B		;GET PATTERN BYTE
+                
+ F09D B7        	ORA	A		;PATTERN END?
+ F09E C2A4F0    	JNZ	CML2
+ F0A1 01E7F0    	LXI	B,MTPAT		;Y: RESTART PATTERN
+                
+ F0A4 03        CML2:	INX	B		;NEXT PATTERN BYTE
+                
+                
+ F0A5 BE        	CMP	M		;COMPARE PATTERN TO MEMORY
+ F0A6 C4C3F0    	CNZ	CMPERR		;REPORT ANY MISMATCH
+                
+ F0A9 23        	INX	H		;NEXT RAM LOCATION
+                
+ F0AA 1B        	DCX	D		;NEXT BYTE COUNT
+ F0AB 7A        	MOV	A,D		;END?
+ F0AC B3        	ORA	E
+ F0AD C293F0    	JNZ	CMLOOP
+                
+                ;---------------------------------------------------
+                ;DONE WITH ONE PASS. PRINT PACIFIER, TEST FOR ABORT,
+                ;AND DO ANOTHER PASS, UNLESS WE ARE DONE.
+                ;---------------------------------------------------
+ F0B0 CD4FFD    	CALL	ILPRNT		;PRINT PACIFIER
+ F0B3 AE        	DB	PCFIER+80H
+                
+ F0B4 CD66FD    	CALL	CHKKBD		;CHANCE TO ABORT
+                
+ F0B7 E1        	POP	H		;H=RAM PAGE ADDRESS
+                
+ F0B8 C1        	POP	B		;PATTERN POSITION
+ F0B9 D1        	POP	D		;BYTE COUNT
+                
+ F0BA 03        	INX	B		;ROTATE PATTERN ONCE
+ F0BB 0A        	LDAX	B		;END OF PATTERN?
+ F0BC B7        	ORA	A
+ F0BD 7C        	MOV	A,H		;RESTORE RAM PAGE ADDRESS
+                
+ F0BE E1        	POP	H		;START ADDRESS
+                
+ F0BF C267F0    	JNZ	MTLOOP
+                
+ F0C2 C9        	RET			;TO MAIN
+                		
+                ;---LOCAL SUBROUTINE----------
+                ;REPORT MEMORY ERROR, AND GIVE
+                ;USER AN OPPORTUNITY TO ABORT
+                ;ON ENTRY:
+                ;  A=EXPECTED DATA
+                ;  HL=ADDRESS
+                ;  (HL)=FOUND DATA
+                ;-----------------------------
+ F0C3 C5        CMPERR:	PUSH	B		;PHLADR TRASHES C
+ F0C4 F5        	PUSH	PSW
+                
+ F0C5 CD5FFE    	CALL	PHLADR		;ADDRESS:
+                
+ F0C8 CD4FFD    	CALL	ILPRNT
+ F0CB 57726F7465	DB	'Wrote',' '+80H
+                
+ F0D1 F1        	POP	PSW		;EXPECTED DATA
+ F0D2 CD43FE    	CALL	PAHEX
+                
+ F0D5 CD4FFD    	CALL	ILPRNT
+ F0D8 2C20726561	DB	', read',' '+80H
+ F0DF 7E        	MOV	A,M
+ F0E0 CD43FE    	CALL	PAHEX		;MEMORY DATA
+                
+ F0E3 C1        	POP	B
+ F0E4 C3CCFB    	JMP	CKPAUS		;ABORT OR PAUSE FROM USER?
+                
+                ;---------------------------------------
+                ; MEMORY TEST PATTERN SEQUENCE
+                ; DELIBERATELY A PRIME NUMBER OF BYTES.
+                ; THE FIRST BYTE MAY BE 0. THE LAST BYTE
+                ; MUST BE 0. NO OTHER BYTES MAY BE 0.
+                ;---------------------------------------
+ F0E7 00FF55AA33MTPAT:	DB	000H,0FFH,055H,0AAH,033H,0CCH,0F0H,00FH
+ F0EF C33C669978	DB	0C3H,03CH,066H,099H,078H,001H,0FEH,002H
+ F0F7 FD04FB08F7	DB	0FDH,004H,0FBH,008H,0F7H,010H,0EFH,020H
+ F0FF FD40BF807F	DB	0FDH,040H,0BFH,080H,07FH
+ F104 00        	DB	00H	;END OF TABLE MARK
+                
+                ;***2732 COMMAND ROUTINE**********************************
+                ;? (HELP)
+                ;*********************************************************
+ F105 CD4AFD    HLPCMD:	CALL	CILPRT
+                ;    123456789012345678901234567890123456789012345678901234567890123
+ F108 4144203C41 DB 'AD <A> <C> [<G>]     Absolute binary dump, optional GO address'
+ F146 0D0A       DB CR,LF
+ F148 414C205B3C DB 'AL [<0/1>]           Absolute binary load, 0 prevents execution'
+ F187 0D0A       DB CR,LF
+ F189 424F202020 DB 'BO                   Boot from Floppy'
+ F1AE 0D0A       DB CR,LF
+ F1B0 434F203C53 DB 'CO <S> <D> <C> [<R>] Copy memory, optional repeat count <R>'
+ F1EB 0D0A       DB CR,LF
+ F1ED 4455203C41 DB 'DU <A> [<C>]         Dump memory'
+ F20D 0D0A       DB CR,LF
+ F20F 454E203C41 DB 'EN <A>               Enter data into memory'
+ F23A 0D0A       DB CR,LF
+ F23C 4558203C41 DB 'EX <A> [<1>]         Execute memory, optional EPROM disable'
+ F277 0D0A       DB CR,LF
+ F279 4649205B3C DB 'FI [<V> [<A> [<C>]]] Fill memory with hex value <V>'
+ F2AC 0D0A       DB CR,LF
+ F2AE 4842205B3C DB 'HB [<P>]             Hard disk boot, optional platter <P>'
+ F2E7 0D0A       DB CR,LF
+ F2E9 4844203C41 DB 'HD <A> <C> [<O>]     Hex dump, optional address offset <O>'
+ F323 0D0A       DB CR,LF
+ F325 484C205B3C DB 'HL [<O>]             Hex load, optional address offset <O>'
+ F35F 0D0A       DB CR,LF
+ F361 4D54203C41 DB 'MT <A> <C>           Memory test'
+ F381 0D0A0A     DB CR,LF,LF
+ F384 20203C413E DB '  <A>, <S>, <D> are addresses. <C> is a byte count.'
+ F3B7 0D0A       DB CR,LF
+ F3B9 20202D2D2D DB '  ---More--','-'+80H
+                
+ F3C5 CDD2FB    	CALL	GETKBD		;WAIT FOR ANYTHING TO BE TYPED
+                
+ F3C8 CD4AFD    	CALL	CILPRT
+                ;    123456789012345678901234567890123456789012345678901234567890123
+ F3CB 0A         DB LF
+ F3CC 494E203C50 DB 'IN <P>               Read input port <P>'
+ F3F4 0D0A       DB CR,LF
+ F3F6 4F54203C50 DB 'OT <P> <V>           Write hex value <V> to output port <P>'
+ F431 0D0A       DB CR,LF
+ F433 5345203C41 DB 'SE <A> <V1> ... <Vn> Search for hex string'
+ F45D 0D0A       DB CR,LF
+ F45F 5345203C41 DB 'SE <A> ',QUOTE,'text',QUOTE,'        Search for text string'
+ F48A 0D0A       DB CR,LF
+ F48C 5445205B3C DB 'TE [<E>]             Terminal mode, ^C [or ^<E>] to exit'
+ F4C4 0D0A       DB CR,LF
+ F4C6 5450203C30 DB 'TP <0-7>             Set transfer port:'
+ F4ED 0D0A       DB CR,LF
+ F4EF 2020202020 DB '                       0: 88-2SIO port 0   4: 88-4PIO port 0'
+ F52B 0D0A       DB CR,LF
+ F52D 2020202020 DB '                       1: 88-2SIO port 0   5: 88-PIO'
+ F561 0D0A       DB CR,LF
+ F563 2020202020 DB '                       2: 88-SIO           6: 88-2SIO port 1'
+ F59F 0D0A       DB CR,LF
+ F5A1 2020202020 DB '                       3: 88-ACR           7: Custom port'
+ F5DA 0D0A       DB CR,LF
+ F5DC 5454203C30 DB 'TT <0/1>             Video Terminal/Teletype-style deleting'
+ F617 0D0A       DB CR,LF
+ F619 5645203C53 DB 'VE <S> <D> <C>       Verify memory'
+ F63B 0D0A0A     DB CR,LF,LF
+ F63E 20203C413E DB '  <A>, <S>, <D> are addresses. <C> is a byte count','.'+80H
+                
+ F671 C9        	RET		;DONE
+                
+                 ENDIF ;EPROM32
+                
+                ;===ASSEMBLY CHECK================================
+                ; ALL OF MONITOR MUST NOT OVERRUN THE NEXT SECTION
+                ;=================================================
+                 IF NOT EPROM32
+                H1END	EQU	$
+                 ENDIF ;NOT EPROM32
+                
+                 IF (MBLADR - H1END)/256
+                	ERROR: MBL IS OVERWRITING PRIOR CODE
+                 ENDIF ;(MBLADR - H1END)/256
+                
+                ;==============================================================
+                ;              MULTI BOOT LOADER SUBSYSTEM (MBL)
+                ;
+                ; LOADS AND RUNS AN ALTAIR 'ABSOLUTE BINARY FILE' FROM INPUT
+                ; TRANSFER PORT SPECIFIED BY THE SENSE SWITCH SETTINGS.
+                ;
+                ; THIS CODE MAY BE ENTERED EITHER BY A CALL FROM THE AMON MAIN
+                ; LOOP OR DIRECTLY FROM RESET (EITHER VIA THE FRONT PANEL OR
+                ; VIA JUMP-START HARDWARE). IF ENTERED FROM AMON, THEN AMON
+                ; WILL PASS THE SELECTED LOAD PORT, AS REQUESTED BY THE USER. 
+                ; IF EXECUTED DIRECTLY, THEN THIS CODE WILL LOOK AT THE FRONT
+                ; PANEL SWITCH REGISTER TO DETERMINE THE LOAD PORT.
+                ;
+                ;** DIFFERENCES BETWEEN MITS MBL AND THIS CODE **
+                ;
+                ; 1) THE CODE STARTS OFF BY RELOCATING ITSELF TO THE HIGHEST
+                ;    PAGE OF RAM THAT IS FOUND, SO THAT IT WILL STILL WORK
+                ;    IF THE PROM IS PHANTOMED BY AN IN INSTRUCTION FROM PORT
+                ;    FF (THE SWITCH REGISTER).
+                ; 2) ALL HSR SUPPORT IS ELIMINATED, INCLUDING 88-4PIO PORT 1
+                ;    INITIALIZATION AND CODE FOR STARTING THE HSR TRANSPORT.
+                ; 3) THE SECOND 88-2SIOJP PORT (PORT 1) IS INITIALIZED.
+                ; 4) THE SWITCH SETTING THAT WAS ASSIGNED TO THE HSR HAS BEEN
+                ;    REASSIGNED TO THE 88-2SIOJP'S SECOND PORT.
+                ; 5) PTABLE HAS AN 8TH ENTRY, WHICH IS THE SAME AS THE 1ST
+                ;    (2SIO PORT 0). TESTING FOR ILLEGAL SENSE SWITCH SETTING
+                ;    IS THEREBY ELIMINATED.
+                ; 6) AN INITIAL READ IS PERFORMED FOR BOTH THE 88-PIO AND THE
+                ;    88-4PIO PORT 0, TO CLEAR DATA HANDSHAKE LATCHES IN
+                ;    EXTERNAL DEVICES SUCH AS THE OP-80 PAPER TAPE READER
+                ; 7) IF THE TAPE LEADER CHARACTER IS 0, THEN NO CHECKSUM
+                ;    LOADER WILL BE SKIPPED. 
+                ; 9) SENSE SWITCH A11 IS IGNORED WHEN GETTING THE LOAD DEVICE,
+                ;    RATHER THAN GENERATING AN I ERROR.
+                ;
+                ; SINCE THE 88-2SIOJP MAY OPTIONALLY DISABLE PROMS WHEN AN IN
+                ; INSTRUCTION ACCESSES PORT FFH (LIKE SOME VERSIONS OF THE MITS
+                ; 8800B TURNKEY MODULE), THIS CODE CANNOT EXECUTE FROM
+                ; PROM - AT LEAST NOT FROM THE POINT WHERE THE SENSE SWITCHES
+                ; ARE READ ONWARDS.
+                ;
+                ;==============================================================
+                ; AN ALTAIR 'ABSOLUTE BINARY FILE' HAS 4 SECTIONS, WHICH MAY BE
+                ; SEPARATED BY ANY NUMBER OF NULLS. THESE SECTIONS ARE:
+                ;
+                ; 1) THE LEADER, WHICH COMPRISES 2 OR MORE IDENTICAL BYTES, THE
+                ;    VALUE OF WHICH IS THE LENGTH OF THE CHECKSUM LOADER.
+                ;
+                ; 2) THE CHECKSUM LOADER, WHICH IS A PROGRAM THAT IS NORMALLY
+                ;    USED TO LOAD THE SUBSEQUENT SECTIONS
+                ;
+                ; 3) ZERO OR MORE LOAD RECORDS, EACH STRUCTURED AS FOLLOWS:
+                ;       BYTE 0: SYNC BYTE = 3CH (IDENTIFIES A LOAD RECORD)
+                ;       BYTE 1: NN = NUMBER OF DATA BYTES IN RECORD
+                ;       BYTE 2: LL = LOAD ADDRESS LOW BYTE
+                ;       BYTE 3: HH = LOAD ADDRESS HIGH BYTE
+                ; BYTES 4-NN+3: NN DATA BYTES TO STORE AT HHLL, NN>0
+                ;    BYTE NN+4: CC = CHECKSUM OF BYTES 2 THROUGH NN+3
+                ;
+                ; 4) THE GO RECORD, STRUCTURED AS FOLLOWS
+                ;       BYTE 0: SYNC BYTE = 78H (IDENTIFIES THE GO RECORD)
+                ;       BYTE 1: LL = LOW BYTE OF GO ADDRESS
+                ;       BYTE 2: HH = HIGH BYTE OF GO ADDRESS
+                ;
+                ; ALTAIR FILE LEADERS AND CHECKSUM LOADERS ARE SPECIFIC TO
+                ; BOTH THE VERSION OF THE PARTICULAR SOFTWARE AND THE MEMORY
+                ; SIZE. FOR EXAMPLE, THE CHECKSUM LOADER FOR 4K BASIC 3.2 IS
+                ; DIFFERENT THAN THE CHECKSUM LOADER FOR 8K BASIC 3.2. AND
+                ; BOTH THE LEADER AND CHECKSUM LOADER FOR 8K BASIC 3.2 ARE
+                ; DIFFERENT THAN THOSE FOR 8K BASIC 4.0.
+                ;
+                ; THE MBL CODE IS ABLE TO READ ANY SUCH ALTAIR FILE BY SIMPLY
+                ; SKIPPING OVER THE LEADER AND CHECKSUM LOADER, AND LOADING
+                ; THE LOAD AND GO RECORDS DIRECTLY.
+                ;
+                ; WHEN EXECUTED AT THE MBL ADDRESS, MBL CHOOSES ITS INPUT
+                ; PORT BASED ON THE FRONT PANEL SENSE SWITCHES <2:0>, USING
+                ; THE CONVENTIONS SET UP IN BASIC 4.X, MORE OR LESS.
+                ;
+                ;  DEVICE                   BITS 2:0
+                ;  88-2SIO PORT 0 (2 STOPS)   000B
+                ;  88-2SIO PORT 0 (2 STOPS)   001B
+                ;  88-SIO                     010B
+                ;  88-ACR                     011B
+                ;  88-4PIO                    100B
+                ;  88-PIO                     101B
+                ;  88-2SIO PORT 1 (2 STOPS)   110B
+                ;  88-2SIO PORT 0 (2 STOPS)   000B (SPARE)
+                ;
+                ; PRIOR TO BASIC 4.0, MITS USED DIFFERENT SENSE SWITCH SETTINGS
+                ; TO SPECIFY THE CONSOLE DEVICE. YOU CAN LOAD AN OLDER TAPE
+                ; BY SETTING THE SWITCHES ACCORDING TO THE ABOVE TABLE AND
+                ; STARTING THE LOAD. AFTER THE CHECKSUM LOADER ON THE TAPE
+                ; HAS BEEN SKIPPED, AND LOAD RECORDS ARE LOADING (BUT BEFORE
+                ; THE LOAD COMPLETES) CHANGE THE SENSE SWITCH SETTINGS AS
+                ; REQUIRED BY THE EARLIER VERSION OF BASIC (OR OTHER PROGRAM)
+                ; THAT YOU ARE LOADING.
+                ;==============================================================
+                
+ FE00           	ORG	MBLADR
+                
+                ;--------
+                ;FIND RAM
+                ;--------
+ FE00 010AFE    MBL:	LXI	B,GOMBL		;RETURN ADDRESS
+ FE03 C303F8    	JMP	INIT		;GO FIND A REAL STACK, INSTALL
+                				;SELF-MODIFYING I/O ROUTINES,
+                				;AND INITIALIZE ALL KNOWN PORTS
+                				;RETURNS WITH E=0
+                
+                ;***COMMAND ROUTINE**************************************
+                ; AL <0/1> (BOOT FROM PAPER OR CASSETTE TAPE)
+                ;     GO RECORD IGNORED IF PARAMETER=0. DEFAULT TO 1.
+                ; NOTE: PARAMETER IS NOT BOUNDS-CHECKED, BUT
+                ; NOTHING BAD WILL HAPPEN WITH BOGUS VALUES
+                ;
+                ; ON ENTRY:
+                ;    TP COMMAND HAS SET UP THE TRANSFER PORT
+                ;    CARRY SET IF NO PARAMETER TYPED
+                ;    L = 0 AND CARRY CLEAR IF GO RECORD SHOULD BE IGNORED
+                ;********************************************************
+ FE06 3E01      ALCMD:	MVI	A,1
+ FE08 8D        	ADC	L		;CATCH CARRY BIT
+ FE09 5F        	MOV	E,A		;E = 1 OR 2
+                
+                ;FALL INTO GOMBL
+                
+                ;---------------------------------------------------
+                ;ENTRY HERE FROM COLD-START AT MBL:
+                ;   E=0
+                ;   NOTHING ON STACK
+                ;ENTRY HERE FROM MONITOR CALL TO ALCMD (AL COMMAND):
+                ;  E = 1 IF GO RECORD SHOULD BE IGNORED
+                ;  E = 2 IF GO RECORD SHOULD BE EXECUTED
+                ;  BOTTOM OF STACK = ADDRESS OF MAIN
+                ;---------------------------------------------------
+ FE0A 3E7B      GOMBL:	MVI	A,RAMBUF	;SECTOR BUFFER AT END OF PAGE
+ FE0C CDE9FF    	CALL	RAMPAG		;HL=ADDRESS OF BUFFER
+                
+                ;---------------------------------------------------------
+                ;RELOCATE PROM IMAGE TO THE SECTOR BUFFER IN RAM.
+                ;RUN-TIME RELOCATION OF ADDRESSES IS DONE BY REPLACING ANY
+                ;BYTE THAT MATCHES THE MSB OF THE ORG ADDRESS WITH THE MSB
+                ;OF THE DESTINATION RAM ADDRESS. THIS REQUIRES THE VALUE
+                ;OF THE ORG MSB NEVER TO APPEAR IN THE ASSEMBLED CODE OTHER
+                ;THAN AS THE MSB OF AN ADDRESS. (F800 WORKS FOR THIS.)
+                ;ON ENTRY:
+                ;  HL = RAMBUF ADDRESS (WHERE TO MOVE CODE AND EXECUTE IT)
+                ;  E = 0 IF PROM MAY BE DISABLED (COLD-START AT MBL)
+                ;  E = 1 IF GO RECORD SHOULD BE IGNORED
+                ;  E = 2 IF GO RECORD SHOULD BE EXECUTED
+                ;ON 'RET' TO THE RAM CODE:
+                ;  D = RAM EXECUTION PAGE
+                ;  E = UNCHANGED
+                ;  Z SET IF SENSE SWITCHES DETERMINE TRANSFER PORT
+                ;---------------------------------------------------------
+ FE0F E5        	PUSH	H		;RAM CODE EXECUTION ADDRESS
+                
+ FE10 017BFE    	LXI	B,MRCODE	;SOURCE ADDRESS
+                
+ FE13 0A        RELOOP:	LDAX	B
+ FE14 B8        	CMP	B		;RELOCATABLE ADDRESS BYTE?
+ FE15 C219FE    	JNZ	NOTADR
+ FE18 7C        	MOV	A,H		;Y: RELOCATE THIS ADDRESS
+ FE19 77        NOTADR:	MOV	M,A
+ FE1A 03        	INX	B
+ FE1B 2C        	INR	L		;DON'T LET H CHANGE AT THE END
+ FE1C C213FE    	JNZ	RELOOP		;RUN TO THE END OF THE PAGE
+                
+                ;SET D=RAM EXECUTION PAGE FOR OVERWRITE DETECTION DURING LOAD
+                
+ FE1F 54        	MOV	D,H
+                
+                ;TEST SENSE SWITCHES IF COLD-START. OTHERWISE USE TRANSFER PORT
+                ;AS SET UP BY AMON.
+                
+ FE20 1C        	INR	E		;E=1 IF ENTRY FROM AMON
+ FE21 1D        	DCR	E		;USE SWITCHES? Z SET IF SO
+ FE22 C8        	RZ			;EXECUTE THE LOADED CODE
+                
+ FE23 E1        	POP	H
+ FE24 2E82      	MVI	L,(SKPSW-MRCODE)+RAMBUF
+ FE26 E9        	PCHL			;SKIP SENSE SWITCH TEST
+                
+                ;==============================================================
+                ; AMON SUBROUTINES, OCCUPYING A HOLE IN THE PROM SPACE
+                ;==============================================================
+                
+                ;***COMMAND ROUTINE************************************
+                ; IN <PORT> (INPUT FROM PORT)
+                ; ON ENTRY:
+                ;    L=PORT
+                ; CREATES THIS ROUTINE ON THE STACK, THEN EXECUTES IT,
+                ; THEN RETURNS THROUGH PAHEX TO PRINT THE VALUE
+                ;
+                ;       NOP
+                ;       IN   <PORT>
+                ;       RET
+                ;******************************************************
+ FE27 113DFE    INCMD:	LXI	D,PCAHEX	;CREATE RETURN ADDRESS
+ FE2A D5        	PUSH	D		;RET THROUGH PCAHEX
+                
+ FE2B 26C9      	MVI	H,RET		;OPCODE
+ FE2D E5        	PUSH	H		;L=<PORT>
+ FE2E 2100DB    	LXI	H,IN*256	;NOP,IN OPCODE
+ FE31 E5        	PUSH	H
+ FE32 65        	MOV	H,L		;HL=0
+ FE33 39        	DAD	SP		;HL POINTS TO ROUTINE
+                
+ FE34 D1        	POP	D		;FIX STACK
+ FE35 D1        	POP	D
+ FE36 E9        	PCHL			;EXECUTE RAM ROUTINE
+                
+                ;***SUBROUTINE****************
+                ; PRINT HL AS 4 HEX DIGITS
+                ; ON ENTRY:
+                ;   B=0 FOR THE CONSOLE
+                ;   B<>0 FOR THE TRANSFER PORT
+                ;   C=CHECKSUM SO FAR
+                ;  HL=2 BYTES TO PRINT
+                ; ON EXIT:
+                ;   C=UPDATED CHECKSUM
+                ; TRASHES A
+                ;*****************************
+ FE37 7C        PHLHEX:	MOV	A,H		;H FIRST
+ FE38 CD3FFE    	CALL	PAHEXC		;RETURNS WITH CARRY CLEAR
+ FE3B 7D        	MOV	A,L		;THEN L
+                
+ FE3C FE        	DB	CPI		;CPI OPCODE SKIPS PCAHEX
+                				;EXECUTING A NOP, AND THEN
+                				;..FALLING INTO PAHEX
+                
+                ;***SUBROUTINE**********************
+                ; PRINT A ON CONSOLE AS 2 HEX DIGITS
+                ; ON ENTRY:
+                ;   A=BYTE TO PRINT
+                ; ON EXIT:
+                ;   B=0
+                ; TRASHES A,C
+                ;***********************************
+ FE3D 0600      PCAHEX:	MVI	B,0		;PRINT TO CONSOLE
+                
+                ;FALL INTO PAHEX
+                
+                ;***SUBROUTINE*******************************
+                ; PRINT A AS 2 HEX DIGITS AND UPDATE CHECKSUM
+                ; ON ENTRY:
+                ;   A=BYTE TO PRINT
+                ;   B=0 FOR THE CONSOLE
+                ;   B<>0 FOR THE TRANSFER PORT
+                ;   C=CHECKSUM SO FAR
+                ; ON EXIT:
+                ;   C=UPDATED CHECKSUM
+                ; TRASHES A
+                ;********************************************
+ FE3F F5        PAHEXC:	PUSH	PSW
+ FE40 81        	ADD	C		;COMPUTE CHECKSUM
+ FE41 4F        	MOV	C,A
+ FE42 F1        	POP	PSW		;RECOVER CHARACTER
+                
+                ;FALL INTO PAHEX
+                
+                ;***SUBROUTINE****************
+                ; PRINT A AS 2 HEX DIGITS
+                ; ON ENTRY:
+                ;   A=BYTE TO PRINT
+                ;   B=0 FOR THE CONSOLE
+                ;   B<>0 FOR THE TRANSFER PORT
+                ; ON EXIT:
+                ; TRASHES A
+                ;*****************************
+ FE43 F5        PAHEX:	PUSH	PSW		;SAVE FOR LOW DIGIT
+                	
+ FE44 0F        	RRC			;MOVE THE HIGH FOUR DOWN
+ FE45 0F        	RRC
+ FE46 0F        	RRC
+ FE47 0F        	RRC
+ FE48 CD4CFE    	CALL	PNIBLE		;PUT THEM OUT
+ FE4B F1        	POP	PSW		;THIS TIME THE LOW FOUR
+                
+                ;FALL INTO PNIBLE
+                
+                ;---LOCAL SUBROUTINE----------
+                ; PRINT LOW NIBBLE OF A IN HEX
+                ; ON ENTRY:
+                ;   B=0 FOR THE CONSOLE
+                ;   B<>0 FOR THE TRANSFER PORT
+                ; ON EXIT:
+                ;   A TRASHED
+                ;-----------------------------
+ FE4C E60F      PNIBLE:	ANI	0FH		;FOUR ON THE FLOOR
+ FE4E C630      	ADI	'0'		;WE WORK WITH ASCII HERE
+ FE50 FE3A      	CPI	'9'+1		;0-9?
+ FE52 DA57FE    	JC	PNIB1		;YUP: PRINT & RETURN
+                
+ FE55 C607      	ADI	'A'-'9'-1	;MAKE IT A LETTER
+                
+ FE57 04        PNIB1:	INR	B		;WHICH PORT?
+ FE58 05        	DCR	B
+ FE59 C29BFB    	JNZ	TPOUT		;PRINT ON TRANSFER PORT
+                
+ FE5C C38EF8    	JMP	PRINTA		;EXIT FROM THERE
+                
+                ;***SUBROUTINE**********************************
+                ; PRINT HL IN HEX ON THE CONSOLE,
+                ; PRECEEDED BY CR,LF,SPACE, AND FOLLOWED BY ': '
+                ; ON EXIT:
+                ;    B=0
+                ; TRASHES A,C
+                ;***********************************************
+ FE5F CD4AFD    PHLADR:	CALL	CILPRT		;CR LF SPACE BEGINS LINE
+ FE62 A0        	DB	' '+80H
+                
+ FE63 0600      	MVI	B,0		;OUTPUT ADDRESS TO CONSOLE
+ FE65 CDF5FC    	CALL	PHLCHX		;HL=ADDRESS, B=0, TRASH C
+                
+ FE68 CD4FFD    	CALL	ILPRNT		;PRINT COLON SPACE
+ FE6B 3AA0      	DB	':',' '+80H
+ FE6D C9        	RET
+                
+                ;***SUBROUTINE*******************************
+                ; CONVERT ASCII HEX DIGIT TO BINARY
+                ; ON ENTRY:
+                ;   A=CHARACTER TO CONVERT
+                ; ON EXIT:
+                ;   A=BINARY RESULT
+                ;   CARRY SET IF OK, CLEAR IF BOGUS CHARACTER
+                ;********************************************
+ FE6E D630      HEXCON:	SUI	'0'		;REMOVE ASCII BIAS
+ FE70 FE0A      	CPI	10
+ FE72 D8        	RC			;IF 0-9 THEN WE'RE DONE
+                
+ FE73 D611      	SUI	9+('A'-'9')	;SHOULD BE 0-5 NOW
+ FE75 FE06      	CPI	6		;GAP CHR OR TOO HIGH?
+ FE77 D0        	RNC			;ERROR IF SO
+                
+ FE78 D6F6      	SUI	0F6H		;ADD 0AH, SET CARRY
+ FE7A C9        	RET			;RET WITH CARRY SET
+                
+                
+                ;===ASSEMBLY CHECK================================
+                ; THE ABOVE CODE MUST NOT OVERRUN THE NEXT SECTION
+                ;=================================================
+ FE7B =         H2END	EQU	$
+                
+                 IF (MRCODE - H2END)/256
+                	ERROR: CODE IN HOLE 2 IS TOO BIG
+                 ENDIF
+                
+                ;=============================================================
+                ; MBL RAM EXECUTION CODE
+                ; ALL OF THE FOLLOWING CODE GETS COPIED INTO THE RAM BUFFER
+                ; (WHICH IS IN THE HIGHEST PAGE OF RAM THAT WAS DISCOVERED
+                ; DURING INITIALIZATION). THIS IS IN RAM BECAUSE AN IN FROM
+                ; PORT FF (THE FRONT PANEL SENSE SWITCHES) OPTIONALLY DISABLES
+                ; THE PROM.
+                ; ON ENTRY:
+                ;    D = RAM EXECUTION PAGE
+                ; ENTRY AT MRCODE:
+                ;    E = 0 (PROM WILL BE DISABLED BY THE UPCOMING IN FF)
+                ; ENTRY AT SKPSW:
+                ;   TRANSFER PORT ALREADY SET UP
+                ;   PROM IS STILL ENABLED
+                ;   E = 1 IF GO RECORD SHOULD BE IGNORED
+                ;   E > 1 IF GO RECORD SHOULD BE EXECUTED
+                ;=============================================================
+ FE7B           	ORG	MBLADR+RAMBUF	;FORCE LOW ADDRESS BYTE
+                				;..TO BE THE SAME
+                
+ FE7B DBFF      MRCODE:	IN	SSWTCH		;N: READ SENSE SWITCHES
+ FE7D E607      	ANI	LDMASK		;BITS SPECIFY LOAD DEVICE
+                
+                
+                ;	CALL	RSETP		;SET UP TRANSFER PORT
+ FE7F CD        	DB	CALL		;CALL OPCODE
+ FE80 00        	DB	RSETP-RIOCOD+RAMCOD ;LOW ADDRESS BYTE
+ FE81 FE        	DB	MRCODE/256	;HIGH BYTE (GETS RELOCATED)
+                SKPSW:
+                
+                ;----------------------------------------------
+                ;FLUSH EXTERNAL DATA LATCHES FOR E.G. THE OP-80
+                ;OR FLUSH GARBAGE FROM UARTS
+                ;ON ENTRY & EXIT:
+                ;  D = RAM EXECUTION PAGE
+                ;  E = 0 IF PROM MAY BE DISABLED
+                ;  E = 1 IF GO RECORD SHOULD BE IGNORED
+                ;  E > 1 IF GO RECORD SHOULD BE EXECUTED
+                ;-----------------------------------------------
+                ;	CALL	RTPIF
+ FE82 CD        	DB	CALL		;CALL OPCODE
+ FE83 38        	DB	RTPIF-RIOCOD+RAMCOD ;LOW ADDRESS BYTE
+ FE84 FE        	DB	MRCODE/256	;HIGH BYTE (GETS RELOCATED)
+                
+                ;-----------------------------------------------------------
+                ;SKIP OVER LEADER - A SEQUENCE OF IDENTICAL BYTES, THE VALUE
+                ;OF WHICH IS THE LENGTH OF THE CHECKSUM LOADER. IF THE VALUE
+                ;IS  0, THEN THERE IS NO LOADER TO SKIP, SO GO GET RECORDS.
+                ;ON ENTRY:
+                ;  D = RAM EXECUTION PAGE
+                ;ON EXIT:
+                ;  C = CHECKSUM LOADER LENGTH
+                ;  D = RAM EXECUTION PAGE
+                ;  E = 0 IF PROM MAY BE DISABLED
+                ;  E = 1 IF GO RECORD SHOULD BE IGNORED
+                ;  E > 1 IF GO RECORD SHOULD BE EXECUTED
+                ;  THE 1ST BYTE OF THE CHECKSUM LOADER HAS ALREADY BEEN READ
+                ;-----------------------------------------------------------
+ FE85 CDF2FE    	CALL 	GETBYT		;GET 1ST BYTE
+                
+ FE88 4F        	MOV	C,A		;NUMBER OF BYTES IN LOADER
+                
+ FE89 B7        	ORA	A		;NULL LEADER?
+ FE8A CA9CFE    	JZ	RCHUNT		;Y: SKIP LEADER
+                
+ FE8D CDF2FE    LDSKIP:	CALL	GETBYT		;GET ANOTHER BYTE
+                
+ FE90 B9        	CMP	C
+ FE91 CA8DFE    	JZ	LDSKIP		;LOOP UNTIL DIFFERENT
+                
+                
+                ;-----------------------------------------------------------
+                ;SKIP OVER CHECKSUM LOADER
+                ;
+                ;ON ENTRY:
+                ;  THE 1ST BYTE OF THE CHECKSUM LOADER HAS ALREADY BEEN READ
+                ;  C=CHECKSUM LOADER LENGTH
+                ;  D = RAM EXECUTION PAGE
+                ;  E = 0 IF PROM MAY BE DISABLED
+                ;  E = 1 IF GO RECORD SHOULD BE IGNORED
+                ;  E > 1 IF GO RECORD SHOULD BE EXECUTED
+                ;-----------------------------------------------------------
+ FE94 0D        	DCR	C		;SINCE WE GOT A BYTE ALREADY
+                
+ FE95 CDF2FE    CLSKIP:	CALL	GETBYT		;GET A LOADER BYTE
+ FE98 0D        	DCR	C
+ FE99 C295FE    	JNZ	CLSKIP
+                
+                ;----------------------------------------------------------
+                ;MAIN RECORD-LOADING LOOP
+                ;
+                ;HUNT FOR A SYNC CHARACTER - EITHER FOR ANOTHER LOAD RECORD
+                ;OR FOR THE GO RECORD. IGNORE ALL ELSE.
+                ;ON ENTRY:
+                ;  D = RAM EXECUTION PAGE
+                ;  E = 0 IF PROM MAY BE DISABLED
+                ;  E = 1 IF GO RECORD SHOULD BE IGNORED
+                ;  E > 1 IF GO RECORD SHOULD BE EXECUTED
+                ;----------------------------------------------------------
+ FE9C CDF2FE    RCHUNT:	CALL	GETBYT		;HUNT FOR SYNC CHARACTER
+                
+                ;NOTE: CAN'T USE CPI OPCODE HERE BECAUSE IT IS FEH
+                
+ FE9F EE3C      	XRI	ALTPLR		;LOAD RECORD SYNC BYTE?
+ FEA1 C2E0FE    	JNZ	CHEKGO		;N: GO SEE IF IT'S A GO
+                
+                ;--------------------------------------------------------
+                ;LOAD RECORD: READ AND STORE DATA FROM A LOAD RECORD
+                ;
+                ;ON ENTRY:
+                ;  THE LOAD RECORD SYNC BYTE HAS ALREADY BEEN READ
+                ;  D = RAM EXECUTION PAGE
+                ;  E = 0 IF PROM MAY BE DISABLED
+                ;  E = 1 IF GO RECORD SHOULD BE IGNORED
+                ;  E > 1 IF GO RECORD SHOULD BE EXECUTED
+                ;  RCHUNT'S ADDRESS IS ON THE STACK
+                ;--------------------------------------------------------
+ FEA4 CDF2FE    	CALL	GETBYT		;GET RECORD BYTE COUNT
+ FEA7 4F        	MOV	C,A		;C COUNTS DATA BYTES
+                
+ FEA8 CDEEFE    	CALL	GETWRD		;GET LOAD ADDRESS INTO A,L
+ FEAB 67        	MOV	H,A		;HL = RECORD LOAD ADDRESS
+                
+ FEAC 85        	ADD	L		;INITIALIZE CHECKSUM
+ FEAD 47        	MOV	B,A
+                	
+                ;LOOP TO READ C DATA BYTES INTO MEMORY AT HL.
+                ;MAKE SURE DATA WON'T OVERWRITE RAM EXECUTION PAGE.
+                
+ FEAE 7A        LRLOOP:	MOV	A,D		;D=RAM EXECUTION PAGE
+ FEAF BC        	CMP	H		;SAME PAGE AS LOAD ADDRESS?
+ FEB0 3E4F      	MVI	A,OERMSG	;OVERWRITE ERROR MESSAGE
+ FEB2 CAD0FE    	JZ	ERDONE		;ERROR EXIT IF OVERWRITE
+                
+ FEB5 CDF2FE    	CALL	GETBYT		;GET A DATA BYTE
+                
+ FEB8 77        	MOV	M,A		;STORE DATA BYTE
+ FEB9 BE        	CMP	M		;DID IT STORE CORRECTLY?
+ FEBA C2CEFE    	JNZ	MERDON		;ERROR EXIT IF MISMATCH
+                
+ FEBD 80        	ADD	B		;COMPUTE CHECKSUM
+ FEBE 47        	MOV	B,A
+                
+ FEBF 23        	INX	H		;BUMP DEST POINTER
+ FEC0 0D        	DCR	C		;BUMP BYTE COUNT
+ FEC1 C2AEFE    	JNZ	LRLOOP		;LOOP THROUGH ALL BYTES
+                
+                ;VALIDATE CHECKSUM, FAIL IF IT DOESN'T MATCH
+                
+ FEC4 CDF2FE    	CALL	GETBYT		;TEST RECORD'S CHECKSUM
+ FEC7 B8        	CMP	B
+ FEC8 CA9CFE    	JZ	RCHUNT		;MATCH: GET ANOTHER RECORD
+                
+ FECB 3E43      	MVI	A,CERMSG	;CHECKSUM ERROR MESSAGE
+ FECD CA        	DB	JZ		;SKIPS 2 BYTES
+                
+                ;SKIP INTO ERDONE
+                
+                
+ FECE 3E4D      MERDON:	MVI	A,MERMSG	;MEMORY ERROR MESSAGE
+                
+                ;FALL INTO ERDONE
+                
+                ;------------------------------------------------------------
+                ;LOAD ERROR:
+                ; TURN THE INTE LIGHT ON AS AN ERROR INDICATOR. IF THE PROM
+                ; HAS NOT BEEN DISABLED (BY A READ FROM PORT FF), THEN REPORT
+                ; THE ERROR AND RETURN TO THE AMON MONITOR. IF PORT FF HAS
+                ; BEEN READ (TO DETERMINE THE LOAD PORT), THEN SAVE THE ERROR
+                ; CODE AND ADDRESS AT BEGINNING OF MEMORY, AND HANG WRITING
+                ; THE ERROR CODE FOREVER TO THE CONSOLE.
+                ; ON ENTRY:
+                ;    A = ERROR CODE
+                ;    E = 0 IF PROM MAY BE DISABLED
+                ;   HL = OFFENDING ADDRESS
+                ;------------------------------------------------------------
+ FED0 1D        ERDONE:	DCR	E		;PROM DISABLED?
+ FED1 F2CCFF    	JP	RPTERR		;N: REPORT, RETURN TO MONITOR
+                				;THIS ROUTINE NOT RELOCATED
+                
+                ;PROM IS POSSIBLY DISABLED. REPORT ERROR THE OLD WAY.
+                
+ FED4 320000    	STA	00000H		;PROM DISABLED: STORE ERROR CODE
+ FED7 220100    	SHLD	00001H		;STORE OFFENDING ADDRESS
+                
+ FEDA FB        	EI			;INTE LIGHT AS ERROR INDICATOR
+                
+ FEDB D311      ERHANG:	OUT 	S2TXDA		;CONSOLE OUTPUT
+ FEDD C3DBFE    	JMP 	ERHANG
+                
+                ;-------------------
+                ; TEST FOR GO RECORD
+                ;-------------------
+ FEE0 EE44      CHEKGO:	XRI	ALTGOR XOR ALTPLR ;EOF RECORD SYNC BYTE?
+ FEE2 C29CFE    	JNZ	RCHUNT		;N: IGNORE
+                
+                ;FALL INTO GO RECORD EXECUTION
+                
+                ;-------------------------------------------
+                ;GO RECORD: GET THE GO ADDRESS AND GO THERE
+                ;
+                ;ON ENTRY:
+                ;  E = 0 IF PROM MAY BE DISABLED
+                ;  E = 1 IF GO RECORD SHOULD BE IGNORED
+                ;  E > 1 IF GO RECORD SHOULD BE EXECUTED
+                ;  GO-RECORD SYNC BYTE HAS ALREADY BEEN READ
+                ;-------------------------------------------
+ FEE5 CDEEFE    	CALL	GETWRD		;GET A,L=ADDRESS
+ FEE8 67        	MOV	H,A		;HIGH BYTE
+                
+ FEE9 1D        	DCR	E		;EXECUTE GO RECORD?
+ FEEA CAF5FC    	JZ	PHLCHX		;N:PRINT GO ADDRESS AND QUIT	
+                
+ FEED E9        	PCHL			;GO TO GO ADDRESS
+                
+                ;---LOCAL SUBROUTINE----------------
+                ; GET 2-BYTE WORD FROM TRANSFER PORT
+                ; ON ENTRY:
+                ;   B=CHECKSUM SO FAR
+                ; ON EXIT:
+                ;   L = NEXT BYTE
+                ;   A = SUBSEQUENT BYTE
+                ;   B := B+A+L
+                ;-----------------------------------
+ FEEE CDF2FE    GETWRD:	CALL	GETBYT
+ FEF1 6F        	MOV	L,A
+                
+                ;FALL INTO GETBYT TO GET THE HIGH BYTE
+                	
+                ;---LOCAL SUBROUTINE-------------------------------
+                ; GET A BYTE OF DATA FROM THE TRANSFER PORT
+                ; WITH USER-ABORT OPPORTUNITY
+                ; ON ENTRY:
+                ;   E = 0 IF AMON PROM MAY BE DISABLED
+                ; ON EXIT:
+                ;   A = RECEIVED CHARACTER
+                ;--------------------------------------------------
+                GETBYT:
+                ;	CALL	RTPIS		;GET TRANSFER PORT STATUS
+ FEF2 CD        	DB	CALL		;CALL OPCODE
+ FEF3 2C        	DB	RTPIS-RIOCOD+RAMCOD ;LOW ADDRESS BYTE
+ FEF4 FE        	DB	MRCODE/256	;HIGH BYTE (GETS RELOCATED)
+                
+                ;	JNZ	RTPIF		;GO GET TRANSFER PORT DATA BYTE
+ FEF5 C2        	DB	JNZ		;CALL OPCODE
+ FEF6 38        	DB	RTPIF-RIOCOD+RAMCOD ;LOW ADDRESS BYTE
+ FEF7 FE        	DB	MRCODE/256	;HIGH BYTE (GETS RELOCATED)
+                
+ FEF8 7B        	MOV	A,E
+ FEF9 B7        	ORA	A		;PROM CERTAINLTY ENABLED?
+ FEFA C462FD    	CNZ	CKABRT		;Y: USER ABORT?
+                
+ FEFD C3F2FE    	JMP	GETBYT		;WAIT FOR CHARACTER
+                
+                ;===========================================
+                ; END OF MBL CODE COPIED INTO THE RAM BUFFER
+                ;===========================================
+                MRCEND:
+                
+                ;===ASSEMBLY CHECK===============================
+                ; MBL CODE MUST NOT OVERWRITE THE CDBL CODE BELOW
+                ;================================================
+ FF00 =         SUBEND	EQU	$
+                
+                 IF (DBLADR - SUBEND)/256
+                	ERROR: CDBL IS OVERWRITING PRIOR CODE
+                
+                 ENDIF
+                
+                ;==============================================================
+                ;=         COMBO DISK BOOT LOADER SUBSYSTEM (CDBL)            =
+                ;=        FOR THE ALTAIR 88-DCDD 8" DISK SYSTEM AND           =
+                ;=            THE ALTAIR 88-MDS MINIDISK SYSTEM               =
+                ;=                                                            =
+                ;= CDBL LOADS SOFTWARE (E.G. ALTAIR DISK BASIC) FROM AN       =
+                ;= ALTAIR 88-DCDD 8" DISK OR AN 88-MDS 5-1/4" MINIDISK,       =
+                ;= AUTOMATICALLY DETECTING WHICH KIND OF DRIVE IS ATTACHED.   =
+                ;==============================================================
+                ;=                         NOTES                              =
+                ;=                                                            =
+                ;= MINIDISKS HAVE 16 SECTORS/TRACK, NUMBERED 0 THROUGH 15.    =
+                ;= 8" DISKS HAVE 32 SECTORS/TRACK, NUMBERED 0 THROUGH 31.     =
+                ;= CDBL FIGURES OUT WHICH KIND OF DISK DRIVE IS ATTACHED,     =
+                ;= BASED ON THE EXISTANCE OF SECTOR NUMBER 16.                =
+                ;=                                                            =
+                ;=       ALTAIR DISK SECTOR FORMAT (FOR BOOT SECTORS)         =
+                ;=                                                            =
+                ;=   BYTE(S)     FUNCTION                BUFFER ADDRESS       =
+                ;=     0       TRACK NUMBER+80H (SYNC)     RAMADR+7BH         =
+                ;=     1       FILE SIZE LOW BYTE          RAMADR+7CH         =
+                ;=     2       FILE SIZE HIGH BYTE         RAMADR+7DH         =
+                ;=   3-130     SECTOR DATA          RAMADR+7EH TO RAMADR+FDH  =
+                ;=    131      MARKER BYTE (0FFH)          RAMADR+FEH         =
+                ;=    132      CHECKSUM                    RAMADR+FFH         =
+                ;=    133-136  SPARE                        NOT READ          =
+                ;=                                                            =
+                ;= EACH SECTOR HEADER CONTAINS A 16-BIT FILE-SIZE VALUE:      =
+                ;= THIS MANY BYTES (ROUNDED UP TO AN EXACT SECTOR) ARE READ   =
+                ;= FROM THE DISK AND WRITTEN TO RAM, STARTING AT ADDRESS 0.   =
+                ;= WHEN DONE (ASSUMING NO ERRORS), CDBL THEN JUMPS TO         =
+                ;= ADDRESS 0 (DMAADR) TO EXECUTE THE LOADED CODE.             =
+                ;=                                                            =
+                ;= SECTORS ARE INTERLEAVED 2:1. CDBL READS THE EVEN SECTORS   =
+                ;= ON EACH TRACK FIRST (STARTING WITH TRACK 0, SECTOR 0)      =
+                ;= FOLLOWED BY THE ODD SECTORS (STARTING WITH SECTOR 1),      =
+                ;= CONTINUING THROUGH THE INTERLEAVED SECTORS OF EACH TRACK   =
+                ;= UNTIL THE SPECIFIED NUMBER OF BYTES HAVE BEEN READ.        =
+                ;=                                                            =
+                ;= CDBL FIRST READS EACH SECTOR (INCLUDING THE ACTUAL DATA    =
+                ;= PAYLOAD, AS WELL AS THE 3 HEADER AND THE FIRST 2 TRAILER   =
+                ;= BYTES) FROM DISK INTO THE RAM BUFFER (RAMBUF). NEXT, CDBL  =
+                ;= CHECKS TO SEE IF THIS SECTOR WOULD OVERWRITE THE RAM       =
+                ;= PORTION OF CDBL, AND ABORTS WITH AN 'O' ERROR IF SO. IT    =
+                ;= THEN COPIES THE DATA PAYLOAD PORTION FROM THE BUFFER TO    =
+                ;= ITS FINAL RAM LOCATION, CALCULATING THE CHECKSUM ALONG THE =
+                ;= WAY. DURING THE COPY, EACH BYTE IS READ BACK, TO VERIFY    =
+                ;= CORRECT WRITES. ANY WRITE-VERIFY FAILURE WILL IMMEDIATELY  =
+                ;= ABORT THE LOAD WITH AN 'M' ERROR.                          =
+                ;=                                                            =
+                ;= ANY DISK READ ERROR (A CHECKSUM ERROR OR AN INCORRECT      =
+                ;= MARKER BYTE) WILL CAUSE A RETRY OF THAT SECTOR READ. AFTER =
+                ;= 16 RETRIES ON THE SAME SECTOR, CDBL WILL ABORT THE LOAD    =
+                ;= WITH A 'C' ERROR.                                          =
+                ;=                                                            =
+                ;= IF THE LOAD ABORTS WITH ANY ERROR, THEN THE CDBL SUBSYSTEM =
+                ;= PRINT AN ERROR MESSAGE WITH THE OFFENDING ADDRESS, AND     =
+                ;= JUMP TO THE AMON MAIN LOOP.                               =
+                ;==============================================================
+                
+ FF00           	ORG	DBLADR
+                
+                ;==============================================================
+                ; ENTRY HERE TO EXECUTE CDBL DIRECTLY, TO BOOT FROM A FLOPPY.
+                ; THIS IS THE SAME ADDRESS WHERE MITS'S DBL AND MDBL START.
+                ;==============================================================
+ FF00 0106FF    CDBL:	LXI	B,BOCMD		;RETURN ADDRESS
+ FF03 C303F8    	JMP	INIT		;GO FIND A REAL STACK
+                				;AND INITIALIZE ACIAS
+                
+                ;***COMMAND ROUTINE*********
+                ; BO (BOOT FROM FLOPPY DISK)
+                ;***************************
+                BOCMD:
+                
+                ;-----------------------------------------------------------
+                ;WAIT FOR USER TO INSERT A DISKETTE INTO THE DRIVE 0, AND
+                ;THEN LOAD THAT DRIVE'S HEAD. DO THIS FIRST SO THAT THE DISK
+                ;HAS PLENTY OF TIME TO SETTLE. NOTE THAT A MINIDISK WILL
+                ;ALWAYS REPORT THAT IT IS READY. MINIDISKS WILL HANG (LATER
+                ;ON) WAITING FOR SECTOR 0F, UNTIL A FEW SECONDS AFTER THE
+                ;USER INSERTS A DISK.
+                ;-----------------------------------------------------------
+ FF06 AF        WAITEN:	XRA	A		;BOOT FROM DISK 0
+ FF07 D308      	OUT	DENABL		;..SO ENABLE DISK 0
+                
+ FF09 CD66FD    	CALL	CHKKBD		;ABORT FROM USER?
+                
+ FF0C DB08      	IN	DSTAT		;READ DRIVE STATUS
+ FF0E E608      	ANI	DRVRDY		;DISKETTE IN DRIVE?
+ FF10 C206FF    	JNZ	WAITEN		;NO: WAIT FOR DRIVE READY
+                
+ FF13 3E04      	MVI	A,HEDLOD	;LOAD 8" DISK HEAD, OR ENABLE
+ FF15 D309      	OUT	DCTRL		;..MINIDISK FOR 6.4 SEC
+                
+                ;---------------------------------------------------------------
+                ;STEP IN ONCE, THEN STEP OUT UNTIL TRACK 0 IS DETECTED.
+                ;THE FIRST TIME THROUGH, DELAY AT LEAST 25 MS TO FORCE A MINIMUM
+                ;43 MS STEP WAIT INSTEAD OF 10MS. THIS MEETS THE 8" SPEC FOR
+                ;CHANGING SEEK DIRECTION. (MINIDISK STEP TIME IS ALWAYS 50MS,
+                ;ENFORCED BY THE MNINIDSK CONRTOLLER HARDWARE.) SEE THE 88-DCDD
+                ;DOCUMENTATION FOR DETAILS. THIS LOOP ENDS WITH HL=0.
+                ;---------------------------------------------------------------
+ FF17 212308    	LXI	H,25000/12	;25 MS DELAY 1ST TIME THRU
+ FF1A 3E01      	MVI	A,STEPIN	;STEP IN ONCE FIRST
+                
+ FF1C D309      SEEKT0:	OUT	DCTRL		;ISSUE STEP COMMAND
+                
+ FF1E 2C        	INR	L		;AFTER THE 1ST TIME, THE FOLLOWING
+                				;..LOOP GOES 1 TIME.
+                
+ FF1F 2B        T0DELY:	DCX	H		;(5)
+ FF20 7C        	MOV	A,H		;(5)
+ FF21 B5        	ORA	L		;(4)
+ FF22 C21FFF    	JNZ	T0DELY		;(10)12 US/PASS
+                
+ FF25 DB08      WSTEP:	IN	DSTAT		;WAIT FOR STEP TO COMPLETE
+ FF27 0F        	RRC			;PUT MVHEAD BIT IN CARRY
+ FF28 0F        	RRC			;IS THE SERVO STABLE?
+ FF29 DA25FF    	JC	WSTEP		;NO: WAIT FOR SERVO TO SETTLE
+                
+ FF2C E610      	ANI	TRACK0/4	;ARE WE AT TRACK 00?
+ FF2E 3E02      	MVI	A,STEPOT	;STEP-OUT COMMAND
+ FF30 C21CFF    	JNZ	SEEKT0		;NO: STEP OUT ANOTHER TRACK
+                
+                ;------------------------------------------------------
+                ;DETERMINE IF THIS IS AN 8" DISK OR A MINIDISK, AND SET
+                ;C TO THE CORRECT SECTORS/TRACK FOR THE DETECTED DISK.
+                ;AN 8" DISK HAS 20H SECTORS, NUMBERED 0-1FH. A MINIDISK
+                ;HAS 10H SECTORS, NUMBERED 0-0FH.
+                ;------------------------------------------------------
+                
+                ;WAIT FOR THE HIGHEST MINIDISK SECTOR, SECTOR NUMBER 0FH
+                
+ FF33 DB09      CKDSK1:	IN	DSECTR		;READ THE SECTOR POSITION
+                
+ FF35 E63F      	ANI	SECMSK+SVALID	;MASK SECTOR BITS, AND HUNT
+ FF37 FE1E      	CPI	(MDSPT-1)*2	;..FOR MINIDISK LAST SECTOR
+ FF39 C233FF    	JNZ	CKDSK1		;..ONLY WHILE SVALID IS 0
+                
+                ;WAIT FOR THIS SECTOR TO PASS
+                
+ FF3C DB09      CKDSK2:	IN	DSECTR		;READ THE SECTOR POSITION
+ FF3E 0F        	RRC			;WAIT FOR INVALID SECTOR
+ FF3F D23CFF    	JNC	CKDSK2	
+                
+                ;WAIT FOR AND GET THE NEXT SECTOR NUMBER
+                
+ FF42 DB09      CKDSK3:	IN	DSECTR		;READ THE SECTOR POSITION
+ FF44 0F        	RRC			;PUT SVALID IN CARRY
+ FF45 DA42FF    	JC	CKDSK3		;WAIT FOR SECTOR TO BE VALID
+                
+                ;THE NEXT SECTOR AFTER SECTOR 0FH WILL BE 0 FOR A MINIDISK,
+                ;AND 10H FOR AN 8" DISK. ADDING MDSPT (10H) TO THAT VALUE
+                ;WILL COMPUTE C=10H (FOR MINIDISKS) OR C=20H (FOR 8" DISKS).
+                
+ FF48 E61F      	ANI	SECMSK/2	;MASK SECTOR BITS
+ FF4A C610      	ADI	MDSPT		;COMPUTE SPT
+ FF4C 4F        	MOV	C,A		;..AND SAVE SPT IN C
+                
+                ;------------------------------------------
+                ;SET UP TO LOAD
+                ;ON ENTRY:
+                ;  HL = 0 (DMA ADDRESS & EXECUTION ADDRESS)
+                ;  C = SPT (FOR EITHER MINIDISK OR 8" DISK)
+                ;------------------------------------------
+ FF4D E5        	PUSH	H		;EXECUTION ADDRESS = 0 ONTO STACK
+                
+ FF4E CDE5FF    	CALL	FNDBUF		;FIND HL=BUFFER ADDRESS,
+                				;PUSH DMA ADDRESS = 0
+ FF51 E3        	XTHL			;PUSH BUFFER ADDRESS, RECOVER
+                				;DMA ADDRESS = 0
+                
+ FF52 45        	MOV	B,L		;INITIAL SECTOR NUMBER = 0
+                
+                ;------------------------------------------------------
+                ;READ CURRENT SECTOR OVER AND OVER, UNTIL EITHER THE
+                ;CHECKSUM IS RIGHT, OR THERE HAVE BEEN TOO MANY RETRIES
+                ;  B = CURRENT SECTOR NUMBER
+                ;  C = SECTORS/TRACK FOR THIS KIND OF DISK
+                ; HL = CURRENT DMA ADDRESS
+                ; TOP-OF-STACK = BUFFER ADDRESS
+                ; NEXT ON STACK = EXECUTION ADDRESS
+                ;------------------------------------------------------
+ FF53 3E10      NXTSEC:	MVI	A,RETRYS	;(7)INITIALIZE SECTOR RETRIES
+                
+                ;-----------------------------------------
+                ;BEGIN SECTOR READ
+                ;  A = REMAINING RETRIES FOR THIS SECTOR
+                ;  B = CURRENT SECTOR NUMBER
+                ;  C = SECTORS/TRACK FOR THIS KIND OF DISK
+                ; HL = CURRENT DMA ADDRESS
+                ; TOP-OF-STACK = RAMBUF ADDRESS
+                ; NEXT ON STACK = EXECUTION ADDRESS = 0
+                ;-----------------------------------------
+ FF55 D1        RDSECT:	POP	D		;(10)GET RAMBUF ADDRESS
+ FF56 D5        	PUSH	D		;(11)KEEP IT ON THE STACK
+ FF57 F5        	PUSH	PSW		;(11)REMAINING RETRY COUNT
+                
+                ;---------------------------------------------------
+                ;SECTOR READ STEP 1: HUNT FOR SECTOR SPECIFIED IN B.
+                ;DATA WILL BECOME AVAIABLE 250 US AFTER -SVALID GOES
+                ;LOW. -SVALID IS LOW FOR 30 US (NOMINAL).
+                ;---------------------------------------------------
+ FF58 DB09      FNDSEC:	IN	DSECTR		;(10)READ THE SECTOR POSITION
+                
+ FF5A E63F      	ANI	SECMSK+SVALID	;(7)YES: MASK SECTOR BITS
+                				;..ALONG WITH -SVALID BIT
+ FF5C 0F        	RRC			;(4)SECTOR BITS TO BITS <4:0>
+ FF5D B8        	CMP	B		;(4)FOUND THE DESIRED SECTOR
+                				;..WITH -SVALID LOW?
+ FF5E C258FF    	JNZ	FNDSEC		;(10)NO: WAIT FOR IT
+                
+                ;-----------------------------------------------------------
+                ;TEST FOR DMA ADDRESS THAT WOULD OVERWRITE THE SECTOR BUFFER
+                ;OR THE STACK. DO THIS HERE, WHILE WE HAVE SOME TIME.
+                ;-----------------------------------------------------------
+ FF61 7C        	MOV	A,H		;(5)HIGH BYTE OF DMA ADDRESS
+ FF62 BA        	CMP	D		;(4)HIGH BYTE OF RAM CODE ADDR
+                
+                ;ENTRY POINT FOR REPORTING AN OVERRUN ERROR FROM HL COMMAND
+                ;(Z FLAG IS SET ON ENTRY FROM HL.)
+                
+ FF63 3E4F      OVRERR:	MVI	A,OERMSG	;(7)OVERLAY ERROR MESSAGE
+ FF65 CACCFF    	JZ	RPTERR		;(10)REPORT OVERLAY ERROR
+                
+                ;--------------------------------------
+                ;SET UP FOR THE UPCOMING DATA MOVE
+                ;DO THIS HERE, WHILE WE HAVE SOME TIME.
+                ;--------------------------------------
+ FF68 E5        	PUSH	H		;(11)DMA ADDRESS FOR RETRY
+ FF69 C5        	PUSH	B		;(11)CURRENT SECTOR & SPT
+ FF6A 018000    	LXI	B,BPS		;(10)B= INIT CHECKSUM,
+                				;C= BYTE COUNT FOR MOVLUP
+                
+                ;-------------------------------------------------------
+                ;SECTOR READ STEP 2: READ SECTOR DATA INTO RAMBUF AT DE.
+                ;RAMBUF IS POSITIONED IN MEMORY SUCH THAT E OVERFLOWS
+                ;EXACTLY AT THE END OF THE BUFFER. READ DATA BECOMES
+                ;AVAILABLE 250 US AFTER -SVALID BECOMES TRUE (0).
+                ;
+                ;THIS LOOP MUST BE << 32 US PER PASS. 
+                ;-------------------------------------------------------
+ FF6D DB08      DATLUP:	IN	DSTAT		;(10)READ THE DRIVE STATUS
+ FF6F 07        	RLC			;(4)NEW READ DATA AVAILABLE?
+ FF70 DA6DFF    	JC	DATLUP		;(10)NO: WAIT FOR DATA
+                
+ FF73 DB0A      	IN	DDATA		;(10)READ DATA BYTE
+ FF75 12        	STAX	D		;(7)STORE IT IN SECTOR BUFFER
+ FF76 1C        	INR	E		;(5)MOVE TO NEXT BUFFER ADDRESS
+                				;..AND TEST FOR END
+ FF77 C26DFF    	JNZ	DATLUP		;(10)LOOP IF MORE DATA
+                
+                ;------------------------------------------------
+                ;SECTOR READ STEP 3: MOVE SECTOR DATA FROM RAMBUF
+                ;INTO MEMORY AT HL. COMPUTE CHECKSUM AS WE GO.
+                ;
+                ;8327 CYCLES FOR THIS SECTION
+                ;------------------------------------------------
+ FF7A 1E7E      	MVI	E,SDATA		 ;(7)DE= ADDRESS OF SECTOR DATA
+                				 ;..WITHIN THE SECTOR BUFFER
+                
+ FF7C 1A        MOVLUP:	LDAX	D		;(7)GET SECTOR BUFFER BYTE
+ FF7D 77        	MOV	M,A		;(7)STORE IT AT THE DESTINATION
+ FF7E BE                CMP	M		;(7)DID IT STORE CORRECTLY?
+ FF7F C2CAFF    	JNZ	MEMERR		;(10)NO: ABORT W/ MEMORY ERROR
+                
+ FF82 80        	ADD	B		;(4)UPDATE CHECKSUM
+ FF83 47        	MOV	B,A		;(5)SAVE THE UPDATED CHECKSUM
+                
+ FF84 13        	INX	D		;(5)BUMP SECTOR BUFFER POINTER
+ FF85 23        	INX	H		;(5)BUMP DMA POINTER
+ FF86 0D        	DCR	C		;(5)MORE DATA BYTES TO COPY?
+ FF87 C27CFF    	JNZ	MOVLUP		;(10)YES: LOOP
+                
+                ;----------------------------------------------------
+                ;SECTOR READ STEP 4: CHECK MARKER BYTE AND COMPARE
+                ;COMPUTED CHECKSUM AGAINST SECTOR'S CHECKSUM. RETRY/
+                ;ABORT IF WRONG MARKER BYTE OR CHECKSUM MISMATCH.
+                ;ON ENTRY AND EXIT:
+                ;   A=COMPUTED CHECKSUM
+                ;134 CYCLES FOR FOR THIS SECTION
+                ;----------------------------------------------------
+ FF8A EB        	XCHG			;(4)HL=1ST TRAILER BYTE ADDRESS
+                				;DE=DMA ADDRESS
+ FF8B 4E        	MOV	C,M		;(7)GET MARKER, SHOULD BE FFH
+ FF8C 0C        	INR	C		;(5)C SHOULD BE 0 NOW
+                
+ FF8D 23        	INX	H		;(5)(HL)=CHECKSUM BYTE
+ FF8E AE        	XRA	M		;(7)COMPARE TO COMPUTED CKSUM
+ FF8F B1        	ORA	C		;(4)..AND TEST MARKER=FF
+                
+ FF90 C1        	POP	B		;(10)CURRENT SECTOR & SPT
+ FF91 C2BDFF    	JNZ	BADSEC		;(10)NZ: CHECKSUM ERROR
+                
+                ; COMPARE NEXT DMA ADDRESS TO THE FILE BYTE COUNT THAT CAME
+                ; FROM THE SECTOR HEADER. DONE OF DMA ADDRESS IS GREATER.
+                
+ FF94 2E7C      	MVI	L,SFSIZE	;(7)HL=ADDRESS OF FILE SIZE
+ FF96 7E        	MOV	A,M		;(7)LOW BYTE
+ FF97 23        	INX	H		;(5)POINT TO HIGH BYTE
+ FF98 66        	MOV	H,M		;(7)HIGH BYTE
+ FF99 6F        	MOV	L,A		;(5)HL=SFSIZE
+                
+ FF9A EB        	XCHG			;(4)PUT DMA ADDRESS BACK IN HL
+                				;..AND FILE SIZE INTO DE
+                
+ FF9B 7D        	MOV	A,L		;(4)16-BIT SUBTRACTION
+ FF9C 93        	SUB	E		;(4)
+ FF9D 7C        	MOV	A,H		;(5)..THROW AWAY THE RESULT
+ FF9E 9A        	SBB	D		;(4)..BUT KEEP CARRY (BORROW)
+                
+ FF9F D1        	POP	D		;(10)CHUCK OLD DMA ADDRESS
+ FFA0 D1        	POP	D		;(10)CHUCK OLD RETRY COUNT
+                
+ FFA1 D2B5FF    	JNC	FDEXEC		;(10)DONE LOADING IF HL >= DE
+                
+                ;------------------------------------------------------
+                ;NEXT SECTOR: THE SECTORS ARE INTERLEAVED BY TWO.
+                ;READ ALL THE EVEN SECTORS FIRST, THEN THE ODD SECTORS.
+                ;
+                ;44 CYCLES FOR THE NEXT EVEN OR NEXT ODD SECTOR
+                ;------------------------------------------------------
+ FFA4 1153FF    	LXI	D,NXTSEC	;(10)FOR COMPACT JUMPS
+ FFA7 D5        	PUSH	D		;(10)
+                
+ FFA8 04        	INR	B		;(5)SECTOR = SECTOR + 2
+ FFA9 04        	INR	B		;(5)
+                
+ FFAA 78        	MOV	A,B		;(5)EVEN OR ODD SECTORS DONE?
+ FFAB B9        	CMP	C		;(4)C=SPT
+ FFAC D8        	RC			;(5/11)NO: GO READ NEXT SECTOR
+                				;..AT NXTSEC
+                
+                ;TOTAL SECTOR-TO-SECTOR = 28+8327+134+44=8533 CYCLES=4266.5 US
+                ;ONE 8" SECTOR TIME = 5208 US, SO WITH 2:1 INTERLEAVE, WE WILL
+                ;MAKE THE NEXT SECTOR, NO PROBLEM.
+                
+ FFAD 0601      	MVI	B,01H		;1ST ODD SECTOR NUMBER
+ FFAF C8        	RZ			;Z: MUST READ ODD SECTORS NOW
+                				;..AT NXTSEC
+                
+                ;------------------------------------------------------------
+                ;NEXT TRACK: STEP IN, AND READ AGAIN.
+                ;DON'T WAIT FOR THE HEAD TO BE READY (-MVHEAD), SINCE WE JUST
+                ;READ THE ENTIRE PREVIOUS TRACK. DON'T NEED TO WAIT FOR THIS
+                ;STEP-IN TO COMPLETE EITHER, BECAUSE WE WILL DEFINITELY BLOW
+                ;A REVOLUTION GOING FROM THE TRACK'S LAST SECTOR TO SECTOR 0.
+                ;(ONE REVOLUTION TAKES 167 MS, AND ONE STEP TAKES A MAXIMUM
+                ;OF 40 US.) NOTE THAT NXTRAC WILL REPAIR THE STACK.
+                ;------------------------------------------------------------
+ FFB0 78        	MOV	A,B		;STEPIN HAPPENS TO BE 01H
+ FFB1 D309      	OUT	DCTRL
+                
+ FFB3 05        	DCR	B		;START WITH B=0 FOR SECTOR 0
+ FFB4 C9        	RET			;GO TO NXTSEC
+                
+                ;-------------------------------------------------
+                ;EXECUTE SUCCESSFULLY LOADED CODE, AFTER DISABLING
+                ;THE FLOPPY DRIVE AND DISABLING THE PROM
+                ;ON ENTRY:
+                ;  TOP OF STACK = RAMBUF ADDRESS
+                ;  NEXT ON STACK = EXECUTION ADDRESS
+                ;-------------------------------------------------
+ FFB5 3E80      FDEXEC:	MVI	A,DDISBL	;DISABLE FLOPPY CONTROLLER
+ FFB7 D308      	OUT	DENABL
+                
+ FFB9 D1        	POP	D		;CHUCK RAMBUF ADDRESS
+                				;..TO EXPOSE EXEC ADDRESS
+                
+ FFBA C383FA    	JMP	EXECDP		;DISABLE PROM AND EXECUTE CODE
+                
+                ;***ERROR ROUTINE*********************************************
+                ; CHECKSUM ERROR: ATTEMPT RETRY IF NOT TOO MANY RETRIES
+                ; ALREADY. OTHERWISE, ABORT, REPORTING THE ERROR 
+                ; ON ENTRY:
+                ;   TOP OF STACK = ADRESS FOR FIRST BYTE OF THE FAILING SECTOR
+                ;   NEXT ON STACK = RETRY COUNT
+                ;*************************************************************
+ FFBD 3E04      BADSEC:	MVI	A,HEDLOD	;RESTART MINIDISK 6.4 US TIMER
+ FFBF D309      	OUT	DCTRL
+                
+ FFC1 E1        	POP	H		;RESTORE DMA ADDRESS
+ FFC2 F1        	POP	PSW		;GET RETRY COUNT
+ FFC3 3D        	DCR	A		;ANY MORE RETRIES LEFT?
+ FFC4 C255FF    	JNZ	RDSECT		;YES: TRY READING IT AGAIN
+                
+                ;----------------------------------------------------
+                ;IRRECOVERABLE ERROR IN ONE SECTOR: TOO MANY RETRIES.
+                ;THESE ERRORS MAY BE EITHER INCORRECT MARKER BYTES,
+                ;WRONG CHECKSUMS, OR A COMBINATION OF BOTH.
+                ;ON ENTRY:
+                ;  HL=RAM ADRESS FOR FIRST BYTE OF THE FAILING SECTOR
+                ;  SP = VALID ADDRESS IN RAM PAGE
+                ;----------------------------------------------------
+ FFC7 3E43      CSMERR:	MVI	A,CERMSG	;CHECKSUM ERROR MESSAGE
+ FFC9 11        	DB	11H		;'LXI D' OPCODE TO SKIP
+                				;..MEMERR AND GO TO RPTERR
+                
+                ;SKIP INTO RPTERR
+                
+                ;***ERROR ROUTINE*********************
+                ; MEMORY ERROR: MEMORY READBACK FAILED
+                ; ON ENTRY:
+                ;   HL = OFFENDING RAM ADDRESS
+                ;   SP = VALID ADDRESS IN RAM PAGE
+                ;*************************************
+ FFCA 3E4D      MEMERR:	MVI	A,MERMSG	;MEMORY ERROR MESSAGE
+                
+                ;FALL INTO RPTERR
+                
+                ;***CDBL (AND MBL) TERMINATION**************************
+                ; REPORT AN ERROR: TURN THE DISK CONTROLLER OFF, REPORT
+                ; THE ERROR ON THE CONSOLE, TURN ON THE INTE LIGHT, JUMP
+                ; TO THE CONSOLE LOOP.
+                ; ON ENTRY:
+                ;    A = ASCII ERROR CODE
+                ;   HL = OFFENDING RAM ADDRESS
+                ;   SP = VALID ADDRESS IN RAM PAGE
+                ;*******************************************************
+ FFCC CD8EF8    RPTERR:	CALL	PRINTA		;PRINT THE ASCII ERROR CODE
+                
+ FFCF 3E80      	MVI	A,DDISBL	;DISABLE FLOPPY CONTROLLER
+ FFD1 D308      	OUT	DENABL
+                
+                ;FALL INTO HDERR
+                
+                ;***HDBL TERMINATION************************************
+                ; REPORT AN ERROR: REPORT THE ERROR ON THE CONSOLE, TURN
+                ; ON THE INTE LIGHT, JUMP TO THE CONSOLE LOOP.
+                ; ON ENTRY:
+                ;    A = ERROR CODE
+                ;   HL = OFFENDING RAM ADDRESS OR HDSK COMMAND
+                ;   SP = VALID ADDRESS IN RAM PAGE
+                ;*******************************************************
+ FFD3 CD4FFD    HDERR:	CALL	ILPRNT
+ FFD6 206572726F	DB	' error:',' '+80H
+ FFDE CDF5FC    	CALL	PHLCHX		;PRINT HL IN HEX ON CONSOLE
+                
+                ; COOL-START AMON CODE
+                
+ FFE1 FB        	EI			;INTE LIGHT ON (INDICATE ERROR)
+ FFE2 C3BCF8    	JMP	INIT2		;GO TO MONITOR
+                
+                ;***SUBROUTINE********************
+                ; FIND THE RAMBUF ADDRESS
+                ; ON ENTRY:
+                ;   SP = VALID ADDRESS IN RAM PAGE
+                ; ON EXIT:
+                ;   HL = RAM PAGE ITEM ADDRESS
+                ;   PRIOR HL VALUE IS ON THE STACK
+                ;   CARRY IS CLEAR
+                ; TRASHES A
+                ;*********************************
+ FFE5 3E7B      FNDBUF:	MVI	A,RAMBUF
+                
+                ; FALL INTO HRMPAG
+                
+                ;***SUBROUTINE**********************
+                ; SET HL TO LOCATION WITHIN RAM PAGE
+                ; ON ENTRY:
+                ;    A = ADDRESS OFFSET INTO RAM PAGE
+                ;   SP = VALID ADDRESS IN RAM PAGE
+                ; ON EXIT:
+                ;   HL = RAM PAGE ITEM ADDRESS
+                ;   PRIOR HL VALUE IS ON THE STACK
+                ;   CARRY IS CLEAR
+                ;   OTHER FLAGS UNAFFFECTED
+                ;***********************************
+ FFE7 E3        HRMPAG:	XTHL			;SAVE HL, GET RETURN ADDRESS
+ FFE8 E5        	PUSH	H		;RESTORE RETURN ADDRESS
+                
+                ;FALL INTO RAMPAG
+                
+                ;***SUBROUTINE**********************
+                ; SET HL TO LOCATION WITHIN RAM PAGE
+                ; ON ENTRY:
+                ;    A = ADDRESS OFFSET INTO RAM PAGE
+                ;   SP = VALID ADDRESS IN RAM PAGE
+                ; ON EXIT:
+                ;   HL = RAM PAGE ITEM ADDRESS
+                ;   CARRY IS CLEAR
+                ;   OTHER FLAGS UNAFFFECTED
+                ;***********************************
+ FFE9 210000    RAMPAG:	LXI	H,0
+ FFEC 39        	DAD	SP		;GET RAM PAGE, CLEAR CARRY
+ FFED 6F        	MOV	L,A		;REQUESTED RAM ADDRESS
+ FFEE C9        	RET
+                
+                ;***SUBROUTINE**************************************
+                ; GET A HEX VALUE FROM THE LINE BUFFER
+                ; ABORT TO CMDERR IF NONE PROVIDED
+                ; ON ENTRY:
+                ;   DE=ADDRESS OF NEXT ITEM IN THE INPUT LINE BUFFER
+                ; ON EXIT:
+                ;   HL=VALUE
+                ;   DE ADVANCED PAST CHARACTER
+                ;   TOP-OF-STACK = PRIOR HL VALUE
+                ;   ABORT TO CMDERR IF NO VALUE FOUND
+                ;***************************************************
+ FFEF E3        GETHEX:	XTHL			;SAVE HL, PUT RET ADDRESS IN HL
+ FFF0 CD1AF9    	CALL	PHFHEX		;SAVE HL, GET HL=HEX VALUE
+ FFF3 D0        	RNC
+                
+                ;FALL INTO CMDERR IF NO VALUE
+                
+                ;**********************
+                ; COMMAND ERROR HANDLER
+                ;**********************
+ FFF4 CD4AFD    CMDERR:	CALL	CILPRT		;RETURNS Z FLAG CLEARED
+ FFF7 BF        	DB	'?'+80H
+                
+ FFF8 C3DFF8    	JMP	CABORT		;REPAIR STACK, GO TO MAIN
+                
+                ;===ASSEMBLY CHECK================
+                ; ALL OF CDBL AND THE SUBSEQUENT
+                ; SUBROUTINES MUST FIT IN ONE PAGE
+                ;=================================
+ FFFB =         DBLEND	EQU	$
+                
+                 IF (DBLEND - DBLADR)/256
+                	ERROR: CDBL DOES NOT FIT IN A SINGLE PAGE
+                
+                 ENDIF
+ FFFB           	END
